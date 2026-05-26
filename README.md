@@ -223,7 +223,7 @@ para contribuir, abrir issues ou fazer forks. Prioridade atual:
 
 Este projeto é **open source** sob a licença [MIT](LICENSE).
 
-Copyright (c) 2025 **Ângelo Moisés Alves**
+Copyright (c) 2026 **Ângelo Moisés Alves**
 
 Você é livre para usar, modificar e distribuir este software, desde que mantenha
 os créditos ao autor original.
