@@ -25,7 +25,7 @@ Implementa o protocolo BitTorrent (BEP 3) do zero em C++17, sem dependências ex
 export OO_PS4_TOOLCHAIN=/opt/openorbis   # ou onde instalou
 
 # 2. Clona e compila
-git clone https://github.com/seuusuario/ps4-torrent
+git clone https://github.com/angeloINTJ/ps4-torrent
 cd ps4-torrent
 make
 
