@@ -146,7 +146,7 @@ $(GP4): $(PKG_ROOT)/eboot.bin $(PKG_ROOT)/sce_sys/param.sfo
 	@echo '	<volume>' >> $@
 	@echo '		<volume_type>pkg_ps4_app</volume_type>' >> $@
 	@echo '		<volume_id>PS4VOLUME</volume_id>' >> $@
-	@echo '		<volume_ts>2026-05-26 00:00:00</volume_ts>' >> $@
+	@echo '		<volume_ts>'$$(date '+%Y-%m-%d %H:%M:%S')'</volume_ts>' >> $@
 	@echo '		<package content_id="UP0000-$(TITLE_ID)_00-0000000000000000"' >> $@
 	@echo '		         passcode="00000000000000000000000000000000"' >> $@
 	@echo '		         storage_type="digital50"' >> $@
