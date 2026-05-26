@@ -1,12 +1,13 @@
-#pragma once
 // =============================================================================
-// metainfo.hpp — Parser de arquivos .torrent (BEP 3 + BEP 12)
+// metainfo.hpp — .torrent file parser (BEP 3 + BEP 12)
 //
-// Suporta:
-//   - Torrents single-file e multi-file
-//   - announce e announce-list (multi-tracker)
-//   - Cálculo automático do info_hash (SHA1 do info dict raw)
+// Supports:
+//   - Single-file and multi-file torrents
+//   - announce and announce-list (multi-tracker)
+//   - Automatic info_hash calculation (SHA1 of the raw info dict)
 // =============================================================================
+
+#pragma once
 
 #include "bencode.hpp"
 #include "sha1.hpp"
@@ -19,58 +20,58 @@
 namespace bt {
 
 // =============================================================================
-// Estruturas de dados
+// Data structures
 // =============================================================================
 
 /**
- * Uma entrada de arquivo dentro de um torrent multi-file.
+ * A file entry within a multi-file torrent.
  *
- * Exemplo de torrent com estrutura:
- *   MeuAlbum/
- *     faixa01.flac   → path={"MeuAlbum","faixa01.flac"}, length=...
- *     faixa02.flac   → path={"MeuAlbum","faixa02.flac"}, length=...
+ * Example torrent structure:
+ *   MyAlbum/
+ *     track01.flac → path={"MyAlbum","track01.flac"}, length=...
+ *     track02.flac → path={"MyAlbum","track02.flac"}, length=...
  */
 struct FileEntry {
-    std::vector<std::string> path;    // Componentes do caminho (sem separador)
-    int64_t                  length;  // Tamanho em bytes
+    std::vector<std::string> path;    // Path components (no separator)
+    int64_t                  length;  // Size in bytes
 
-    // Offset acumulado em relação ao início do torrent (preenchido pelo parser)
+    // Accumulated offset from the start of the torrent (filled in by the parser)
     int64_t offset = 0;
 
-    // Retorna o caminho como string com '/' como separador
+    // Returns the full path as a string with '/' separator
     std::string path_str() const;
 };
 
 /**
- * Metainfo completo de um arquivo .torrent.
+ * Complete metainfo of a .torrent file.
  *
- * O info_hash é calculado internamente durante o parse() e é o identificador
- * único do torrent na rede BitTorrent.
+ * The info_hash is computed internally during parse() and is the unique
+ * identifier of the torrent on the BitTorrent network.
  */
 struct Metainfo {
     // -------------------------------------------------------------------------
-    // Campos do torrent
+    // Torrent fields
     // -------------------------------------------------------------------------
-    std::string announce;                             // URL do tracker principal
-    std::vector<std::vector<std::string>> announce_list; // BEP 12: lista de trackers
+    std::string announce;                               // Main tracker URL
+    std::vector<std::vector<std::string>> announce_list; // BEP 12: tracker list
 
-    std::string name;          // Nome sugerido do arquivo ou diretório
-    int64_t     piece_length;  // Tamanho de cada peça em bytes (ex: 262144 = 256 KiB)
-    int64_t     total_length;  // Soma do tamanho de todos os arquivos
+    std::string name;          // Suggested file or directory name
+    int64_t     piece_length;  // Size of each piece in bytes (e.g. 262144 = 256 KiB)
+    int64_t     total_length;  // Sum of all file sizes
 
-    // Hashes SHA1 de cada peça (20 bytes cada)
-    // piece_hashes[i] = SHA1 dos bytes da peça i
+    // SHA1 hashes for each piece (20 bytes each)
+    // piece_hashes[i] = SHA1 of the i-th piece's bytes
     std::vector<SHA1::Digest> piece_hashes;
 
-    // Lista de arquivos. Em torrents single-file, tem exatamente um elemento
-    // com path vazio (usa-se o campo `name` como nome do arquivo).
+    // File list. Single-file torrents have exactly one entry with an empty path
+    // (the `name` field is used as the filename).
     std::vector<FileEntry> files;
 
-    // SHA1 do info dict bencoded bruto — identificador do torrent na rede
+    // SHA1 of the raw bencoded info dict — the torrent's identifier on the network
     SHA1::Digest info_hash;
 
     // -------------------------------------------------------------------------
-    // Consultas úteis
+    // Convenience queries
     // -------------------------------------------------------------------------
 
     bool is_single_file() const noexcept {
@@ -82,8 +83,8 @@ struct Metainfo {
     }
 
     /**
-     * Calcula o tamanho real da peça `index`.
-     * A última peça pode ser menor que piece_length.
+     * Returns the actual size of piece at `index`.
+     * The last piece may be smaller than piece_length.
      */
     int64_t piece_size(size_t index) const noexcept {
         if (index + 1 < num_pieces()) return piece_length;
@@ -91,8 +92,8 @@ struct Metainfo {
     }
 
     /**
-     * Número de blocos de 16 KiB na peça `index`.
-     * A última peça (e o último bloco dela) podem ser menores.
+     * Number of 16 KiB blocks in the piece at `index`.
+     * The last piece (and its last block) may be smaller.
      */
     size_t num_blocks_in_piece(size_t index) const noexcept {
         static constexpr int64_t BLOCK_SIZE = 16 * 1024;
@@ -101,14 +102,14 @@ struct Metainfo {
     }
 
     // -------------------------------------------------------------------------
-    // Fábrica
+    // Factory
     // -------------------------------------------------------------------------
 
     /**
-     * Parseia um arquivo .torrent lido como string de bytes.
+     * Parse a .torrent file read as a byte string.
      *
-     * @param raw   Conteúdo completo do .torrent (bytes binários)
-     * @throws std::runtime_error   se o arquivo estiver malformado
+     * @param raw   Full .torrent file contents (binary bytes)
+     * @throws std::runtime_error   if the file is malformed
      */
     static Metainfo parse(const std::string& raw);
 };

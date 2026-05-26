@@ -1,61 +1,62 @@
-# PS4 Torrent — Homebrew BitTorrent Client para PS4
+# PS4 Torrent — Homebrew BitTorrent Client for PS4
 
-**Criado por [Ângelo Moisés Alves](https://github.com/angeloINTJ)**
+**Created by [Ângelo Moisés Alves](https://github.com/angeloINTJ)**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub repo](https://img.shields.io/badge/repo-angeloINTJ%2Fps4--torrent-green.svg)](https://github.com/angeloINTJ/ps4-torrent)
 
-Cliente BitTorrent **open source** nativo para PS4 jailbroken, desenvolvido com o
+**Open source** BitTorrent client for jailbroken PS4, built with the
 [OpenOrbis PS4 Toolchain](https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain).
-Implementa o protocolo BitTorrent (BEP 3) do zero em C++17, sem dependências externas além do musl libc.
+Implements the BitTorrent protocol (BEP 3) from scratch in C++17, with no external
+dependencies beyond musl libc.
 
 ---
 
-## Pré-requisitos
+## Prerequisites
 
-### No PS4
+### On the PS4
 
-| Requisito | Versão | Observação |
+| Requirement | Version | Notes |
 |---|---|---|
-| PS4 com jailbreak | FW ≤ 11.00 | GoldHEN ou ps4debug ativo |
-| Acesso FTP | — | Para enviar arquivos `.torrent` |
-| Remote PKG Installer | — | Para instalar o homebrew |
+| PS4 with jailbreak | FW ≤ 11.00 | GoldHEN or ps4debug active |
+| FTP access | — | For transferring `.torrent` files |
+| Remote PKG Installer | — | For installing the homebrew app |
 
-### No PC (ambiente de build)
+### On the PC (build environment)
 
-| Requisito | Versão | Como instalar |
+| Requirement | Version | How to install |
 |---|---|---|
-| Ubuntu / Debian | 20.04+ | Ou WSL2 no Windows |
+| Ubuntu / Debian | 20.04+ | Or WSL2 on Windows |
 | Clang/LLVM | ≥ 12 | `sudo apt install clang-18 lld-18` |
 | OpenOrbis Toolchain | ≥ 0.5.2 | [Download](https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/tag/v0.5.4) |
-| OpenSSL 1.1 | 1.1.x | Necessário para o `PkgTool.Core` (empacotamento) |
+| OpenSSL 1.1 | 1.1.x | Required by `PkgTool.Core` (packaging) |
 
 ---
 
 ## Build
 
-### 1. Instalar Clang e LLD
+### 1. Install Clang and LLD
 
 ```bash
 sudo apt install -y clang-18 lld-18
 ```
 
-### 2. Instalar o OpenOrbis SDK
+### 2. Install the OpenOrbis SDK
 
 ```bash
-# Baixa e extrai o toolchain
+# Download and extract the toolchain
 wget https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/download/v0.5.4/toolchain-llvm-18.tar.gz
 sudo mkdir -p /opt/openorbis
 sudo tar xzf toolchain-llvm-18.tar.gz -C /opt/openorbis/
 ```
 
-O SDK será extraído em `/opt/openorbis/OpenOrbis/PS4Toolchain/`.
-Aponte a variável `OO_PS4_TOOLCHAIN` para esse diretório.
+The SDK is extracted to `/opt/openorbis/OpenOrbis/PS4Toolchain/`.
+Point the `OO_PS4_TOOLCHAIN` variable to that directory.
 
-### 3. Instalar OpenSSL 1.1 (para o PkgTool.Core)
+### 3. Install OpenSSL 1.1 (for PkgTool.Core)
 
-O `PkgTool.Core` que vem com o toolchain depende do OpenSSL 1.1.
-No Ubuntu 24.04+ o pacote `libssl1.1` foi removido — é necessário compilar:
+The `PkgTool.Core` bundled with the toolchain depends on OpenSSL 1.1.
+On Ubuntu 24.04+ the `libssl1.1` package was removed — you must compile it:
 
 ```bash
 wget https://www.openssl.org/source/openssl-1.1.1w.tar.gz
@@ -67,9 +68,9 @@ mkdir -p $HOME/openssl1.1/lib
 cp libssl.so.1.1 libcrypto.so.1.1 $HOME/openssl1.1/lib/
 ```
 
-### 4. Configurar variáveis de ambiente
+### 4. Set up environment variables
 
-Adicione ao seu `~/.bashrc`:
+Add to your `~/.bashrc`:
 
 ```bash
 export OO_PS4_TOOLCHAIN=/opt/openorbis/OpenOrbis/PS4Toolchain
@@ -78,7 +79,7 @@ export LD_LIBRARY_PATH="$HOME/openssl1.1/lib:$LD_LIBRARY_PATH"
 export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 ```
 
-Crie symlinks para o `clang` e `ld.lld`:
+Create symlinks for `clang` and `ld.lld`:
 
 ```bash
 mkdir -p $HOME/bin
@@ -87,48 +88,48 @@ ln -sf /usr/bin/clang++-18 $HOME/bin/clang++
 ln -sf /usr/bin/lld-18 $HOME/bin/ld.lld
 ```
 
-### 5. Clonar e compilar
+### 5. Clone and build
 
 ```bash
 git clone https://github.com/angeloINTJ/ps4-torrent
 cd ps4-torrent
 
-# Gera os assets (param.sfo + icon0.png)
+# Generate assets (param.sfo + icon0.png)
 ./scripts/setup_assets.sh
 
-# Build completo
+# Full build
 make
 ```
 
-O PKG será gerado em:
+The PKG will be generated at:
 ```
 output/UP0000-BTRC00001_00-0000000000000000.pkg
 ```
 
-### 6. Instalar no PS4
+### 6. Install on the PS4
 
-1. Coloque um arquivo `.torrent` em `/data/pkg/torrents/` via FTP (ps4debug)
-2. Instale o PKG pelo Remote PKG Installer
-3. Lance o app pelo XMB
+1. Place a `.torrent` file in `/data/pkg/torrents/` via FTP (ps4debug)
+2. Install the PKG using Remote PKG Installer
+3. Launch the app from the XMB
 
-O download será salvo em `/data/pkg/downloads/`.
+Downloads are saved to `/data/pkg/downloads/`.
 
 ---
 
-## Arquitetura
+## Architecture
 
 ```
 ps4-torrent/
 ├── include/
-│   ├── bencode.hpp        — Parser/encoder do formato Bencode (BEP 3)
-│   ├── sha1.hpp           — SHA1 header-only (RFC 3174), sem dependências
-│   ├── metainfo.hpp       — Parser de arquivos .torrent
-│   ├── tracker.hpp        — Cliente HTTP para announce de tracker
-│   ├── peer_wire.hpp      — Protocolo wire BitTorrent (handshake, mensagens)
-│   ├── piece_manager.hpp  — Gerenciador de peças, SHA1 verify, escrita em disco
-│   ├── session.hpp        — Orquestrador: tracker + pool de peers + progresso
+│   ├── bencode.hpp        — Bencode format parser/encoder (BEP 3)
+│   ├── sha1.hpp           — SHA1 header-only (RFC 3174), zero dependencies
+│   ├── metainfo.hpp       — .torrent file parser
+│   ├── tracker.hpp        — HTTP client for tracker announce
+│   ├── peer_wire.hpp      — BitTorrent wire protocol (handshake, messages)
+│   ├── piece_manager.hpp  — Piece manager, SHA1 verify, disk writes
+│   ├── session.hpp        — Orchestrator: tracker + peer pool + progress
 │   └── ui/
-│       └── renderer.hpp   — Camada de UI (debug log + input do controle)
+│       └── renderer.hpp   — UI layer (debug log + controller input)
 │
 ├── src/
 │   ├── bencode.cpp
@@ -137,28 +138,28 @@ ps4-torrent/
 │   ├── peer_wire.cpp
 │   ├── piece_manager.cpp
 │   ├── session.cpp
-│   ├── shim.cpp            — Compatibilidade musl <-> PS4 (hidden symbols)
+│   ├── shim.cpp            — musl <-> PS4 compatibility (hidden symbols)
 │   ├── ui/
 │   │   └── renderer.cpp
-│   └── main.cpp           — Ponto de entrada (eboot)
+│   └── main.cpp           — Entry point (eboot)
 │
 ├── assets/
-│   ├── param.sfo          — Metadados do app (gerado pelo toolchain)
-│   └── icon0.png          — Ícone 512×512 (opcional)
+│   ├── param.sfo          — App metadata (generated by the toolchain)
+│   └── icon0.png          — 512×512 icon (optional)
 │
 └── Makefile
 ```
 
-### Fluxo de dados
+### Data flow
 
 ```
 main.cpp
   └─► Session::start()
-        ├─► Metainfo::parse()          — lê e parseia o .torrent
-        ├─► tracker_announce()         — obtém lista de peers
-        ├─► PieceManager (construtor)  — aloca arquivos no disco
-        ├─► [Thread] tracker_thread()  — reannounce periódico
-        ├─► [Thread] progress_thread() — dispara ProgressCallback
+        ├─► Metainfo::parse()          — reads and parses the .torrent
+        ├─► tracker_announce()         — fetches peer list
+        ├─► PieceManager (constructor) — allocates files on disk
+        ├─► [Thread] tracker_thread()  — periodic re-announce
+        ├─► [Thread] progress_thread() — fires ProgressCallback
         └─► run_peer_pool()
               └─► [Thread × N] peer_worker()
                     ├─► PeerConnection::connect()
@@ -168,70 +169,70 @@ main.cpp
                           ├─► PieceManager::next_request()
                           ├─► PeerConnection::send_request()
                           └─► PieceManager::receive_block()
-                                ├─► SHA1::hash()      — verifica peça
-                                └─► write_piece()     — grava no disco
+                                ├─► SHA1::hash()      — verify piece
+                                └─► write_piece()     — write to disk
 ```
 
 ---
 
-## Limitações conhecidas (v0.1)
+## Known limitations (v0.1)
 
-| Limitação | BEP relacionado | Plano |
+| Limitation | Related BEP | Planned |
 |---|---|---|
-| Apenas HTTP tracker (não HTTPS nem UDP) | BEP 15 | v0.2 |
-| Sem DHT (Distributed Hash Table) | BEP 5 | v0.3 |
-| Sem PEX (Peer Exchange) | BEP 11 | v0.3 |
-| Sem seeding (apenas download) | BEP 3 | v0.2 |
-| UI apenas via debug log (sem gráfico) | — | v0.2 (SDL2) |
-| Seleção de arquivo .torrent manual | — | v0.2 |
-| Apenas o primeiro .torrent do diretório | — | v0.2 |
+| HTTP tracker only (no HTTPS or UDP) | BEP 15 | v0.2 |
+| No DHT (Distributed Hash Table) | BEP 5 | v0.3 |
+| No PEX (Peer Exchange) | BEP 11 | v0.3 |
+| No seeding (download only) | BEP 3 | v0.2 |
+| Debug-log UI only (no graphics) | — | v0.2 (SDL2) |
+| Manual .torrent file selection | — | v0.2 |
+| Only the first .torrent in the directory | — | v0.2 |
 
 ---
 
-## Estrutura do protocolo BitTorrent implementada
+## Implemented BitTorrent protocol
 
 ```
-BEP 3  — Protocolo base        ✓ Completo
-  ├── Bencode                  ✓ decode + encode
-  ├── Metainfo (.torrent)      ✓ single-file e multi-file
-  ├── Tracker HTTP announce    ✓ compact peers
-  ├── Peer wire protocol       ✓ todas as mensagens do protocolo base
-  │     ├── Handshake          ✓
-  │     ├── Choke/Unchoke      ✓
-  │     ├── Interested         ✓
-  │     ├── Have/Bitfield      ✓
-  │     ├── Request/Piece      ✓
-  │     └── Cancel             ✓
-  └── Verificação SHA1         ✓ por peça
+BEP 3  — Base protocol           ✓ Complete
+  ├── Bencode                    ✓ decode + encode
+  ├── Metainfo (.torrent)        ✓ single-file and multi-file
+  ├── Tracker HTTP announce      ✓ compact peers
+  ├── Peer wire protocol         ✓ all base protocol messages
+  │     ├── Handshake            ✓
+  │     ├── Choke/Unchoke        ✓
+  │     ├── Interested           ✓
+  │     ├── Have/Bitfield        ✓
+  │     ├── Request/Piece        ✓
+  │     └── Cancel               ✓
+  └── SHA1 verification          ✓ per piece
 ```
 
 ---
 
-## Contribuindo
+## Contributing
 
-Pull requests são bem-vindos! O projeto é open source (MIT) — fique à vontade
-para contribuir, abrir issues ou fazer forks. Prioridade atual:
+Pull requests are welcome! The project is open source (MIT) — feel free to
+contribute, open issues, or fork. Current priorities:
 
-1. **SDL2 UI** — renderização gráfica no framebuffer do PS4
+1. **SDL2 UI** — graphical rendering on the PS4 framebuffer
 2. **UDP Tracker** (BEP 15)
-3. **DHT** (BEP 5) — download sem tracker central
-4. **Seletor de .torrent** via controle
+3. **DHT** (BEP 5) — trackerless download
+4. **Torrent picker** via controller
 
 ---
 
-## Licença
+## License
 
-Este projeto é **open source** sob a licença [MIT](LICENSE).
+This project is **open source** under the [MIT](LICENSE) license.
 
 Copyright (c) 2026 **Ângelo Moisés Alves**
 
-Você é livre para usar, modificar e distribuir este software, desde que mantenha
-os créditos ao autor original.
+You are free to use, modify, and distribute this software, provided you keep
+the original author credits.
 
 ---
 
-## Aviso legal
+## Disclaimer
 
-Este software é para fins educacionais e de pesquisa.
-O uso para download de conteúdo protegido por direitos autorais é de responsabilidade do usuário.
-O OpenOrbis Toolchain não usa nenhuma ferramenta ou código proprietário da Sony.
+This software is for educational and research purposes.
+The user is responsible for any copyrighted content downloaded with it.
+The OpenOrbis Toolchain does not use any proprietary Sony tools or code.

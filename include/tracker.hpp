@@ -1,15 +1,16 @@
+// =============================================================================
+// tracker.hpp — BitTorrent tracker HTTP client (BEP 3)
+//
+// Implemented directly over BSD sockets (no libcurl) to minimize
+// dependencies in the OpenOrbis/PS4 environment.
+//
+// Limitations in this version:
+//   - HTTP only (no HTTPS) — PS4 has SceSsl but it adds complexity
+//   - Compact peer format only (compact=1), standard in practice
+//   - UDP trackers (BEP 15) not implemented yet
+// =============================================================================
+
 #pragma once
-// =============================================================================
-// tracker.hpp — Cliente HTTP para tracker BitTorrent (BEP 3)
-//
-// Implementado diretamente sobre BSD sockets (sem libcurl) para minimizar
-// dependências no ambiente OpenOrbis/PS4.
-//
-// Limitações desta versão:
-//   - Apenas HTTP (não HTTPS) — O PS4 tem SceSsl mas adiciona complexidade
-//   - Apenas formato compacto de peers (compact=1), padrão na prática
-//   - UDP trackers (BEP 15) não implementados ainda
-// =============================================================================
 
 #include "metainfo.hpp"
 
@@ -20,47 +21,47 @@
 namespace bt {
 
 /**
- * Endereço IPv4 de um peer retornado pelo tracker.
+ * IPv4 address of a peer returned by the tracker.
  */
 struct PeerAddr {
-    uint32_t ip;    // Endereço em network byte order (big-endian)
-    uint16_t port;  // Porta em host byte order
+    uint32_t ip;    // Address in network byte order (big-endian)
+    uint16_t port;  // Port in host byte order
 
-    // Retorna IP como string "x.x.x.x"
+    // Returns IP as a "x.x.x.x" string
     std::string ip_str() const;
 };
 
 /**
- * Resposta parseada do tracker.
+ * Parsed tracker response.
  */
 struct TrackerResponse {
-    int32_t               interval   = 1800; // Intervalo em segundos até próximo announce
-    int32_t               min_interval = 0;  // Intervalo mínimo (opcional)
-    int32_t               complete   = 0;    // Seeders
-    int32_t               incomplete = 0;    // Leechers
-    std::vector<PeerAddr> peers;             // Lista de peers
+    int32_t               interval     = 1800; // Seconds until next announce
+    int32_t               min_interval = 0;    // Minimum interval (optional)
+    int32_t               complete     = 0;    // Seeders
+    int32_t               incomplete   = 0;    // Leechers
+    std::vector<PeerAddr> peers;               // Peer list
 
-    std::string failure;  // Não-vazio em caso de erro do tracker
+    std::string failure;  // Non-empty on tracker error
 
     bool ok() const noexcept { return failure.empty(); }
 };
 
 // =============================================================================
-// API pública
+// Public API
 // =============================================================================
 
 /**
- * Realiza um HTTP GET no tracker e retorna a resposta parseada.
+ * Perform an HTTP GET to the tracker and return the parsed response.
  *
- * @param metainfo    Metainfo do torrent (para info_hash e announce URL)
- * @param peer_id     Identificador de 20 bytes do nosso cliente (gerado na sessão)
- * @param port        Porta que estamos ouvindo (0 = apenas leeching)
- * @param uploaded    Bytes enviados até agora
- * @param downloaded  Bytes recebidos até agora
- * @param left        Bytes restantes para download completo
+ * @param metainfo    Torrent metainfo (for info_hash and announce URL)
+ * @param peer_id     Our 20-byte client identifier (generated in the session)
+ * @param port        Port we are listening on (0 = leeching only)
+ * @param uploaded    Bytes uploaded so far
+ * @param downloaded  Bytes downloaded so far
+ * @param left        Bytes remaining until download complete
  * @param event       "started" | "stopped" | "completed" | "" (regular)
  *
- * @throws std::runtime_error  em falha de rede ou resposta inválida
+ * @throws std::runtime_error  on network failure or invalid response
  */
 TrackerResponse tracker_announce(
     const Metainfo&    metainfo,
@@ -73,8 +74,8 @@ TrackerResponse tracker_announce(
 );
 
 /**
- * Encoda bytes brutos para percent-encoding (RFC 3986).
- * Todos os bytes fora de [A-Za-z0-9\-_.~] são codificados como %XX.
+ * Encode raw bytes for percent-encoding (RFC 3986).
+ * All bytes outside [A-Za-z0-9\-_.~] are encoded as %XX.
  */
 std::string url_encode(std::string_view raw);
 

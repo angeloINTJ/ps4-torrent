@@ -1,5 +1,5 @@
 // =============================================================================
-// metainfo.cpp — Implementação do parser de arquivos .torrent
+// metainfo.cpp — .torrent file parser implementation
 // =============================================================================
 
 #include "metainfo.hpp"
@@ -23,35 +23,35 @@ std::string FileEntry::path_str() const {
 }
 
 // =============================================================================
-// Helpers internos
+// Internal helpers
 // =============================================================================
 
 namespace {
 
 /**
- * Localiza o offset e o tamanho do info dict dentro do buffer bencoded bruto.
+ * Locate the offset and size of the info dict within the raw bencoded buffer.
  *
- * O info_hash é o SHA1 dos bytes brutos do info dict (não do valor decodificado),
- * então precisamos encontrar a posição exata no buffer original.
+ * The info_hash is the SHA1 of the raw info dict bytes (not the decoded value),
+ * so we need to find the exact position in the original buffer.
  *
- * Estratégia: procura a key "4:info" no dict raiz, depois avança um valor
- * bencode completo para determinar o fim do info dict.
+ * Strategy: search for the "4:info" key in the root dict, then scan forward
+ * one full bencode value to determine the end of the info dict.
  */
 std::string_view find_raw_info(std::string_view raw) {
-    // Procura pela chave "4:info" no buffer
-    // Nota: pode haver falsos positivos, mas em um .torrent bem formado
-    // a chave "4:info" aparece apenas uma vez no nível raiz.
+    // Search for the "4:info" key in the buffer.
+    // Note: false positives are possible, but in a well-formed .torrent file
+    // the "4:info" key appears only once at the root level.
     const std::string KEY = "4:info";
     auto key_pos = raw.find(KEY);
     if (key_pos == std::string_view::npos)
-        throw std::runtime_error("metainfo: chave 'info' não encontrada");
+        throw std::runtime_error("metainfo: 'info' key not found");
 
     size_t value_start = key_pos + KEY.size();
     if (value_start >= raw.size())
-        throw std::runtime_error("metainfo: info dict truncado");
+        throw std::runtime_error("metainfo: truncated info dict");
 
-    // Avança um valor bencode completo a partir de value_start
-    // usando um mini-scanner que conta depth de d...e / l...e
+    // Advance one full bencode value from value_start
+    // using a mini-scanner that tracks d...e / l...e nesting depth
     size_t pos   = value_start;
     int    depth = 0;
 
@@ -59,10 +59,10 @@ std::string_view find_raw_info(std::string_view raw) {
         char c = raw[pos];
 
         if (c == 'i') {
-            // Inteiro: i<num>e
+            // Integer: i<num>e
             ++pos;
             while (pos < raw.size() && raw[pos] != 'e') ++pos;
-            ++pos; // consome o 'e'
+            ++pos; // consume 'e'
             if (depth == 0) break;
 
         } else if (c == 'l' || c == 'd') {
@@ -78,7 +78,7 @@ std::string_view find_raw_info(std::string_view raw) {
             // String: <len>:<bytes>
             size_t colon = raw.find(':', pos);
             if (colon == std::string_view::npos)
-                throw std::runtime_error("metainfo: string malformada no info dict");
+                throw std::runtime_error("metainfo: malformed string in info dict");
 
             size_t len = 0;
             for (size_t i = pos; i < colon; ++i) {
@@ -89,7 +89,7 @@ std::string_view find_raw_info(std::string_view raw) {
 
         } else {
             throw std::runtime_error(
-                std::string("metainfo: caractere inesperado '") + c + "' ao escanear info dict");
+                std::string("metainfo: unexpected character '") + c + "' while scanning info dict");
         }
     }
 
@@ -97,36 +97,36 @@ std::string_view find_raw_info(std::string_view raw) {
 }
 
 // -------------------------------------------------------------------------
-// Accessors seguros para dicionários bencoded
+// Safe accessors for bencode dictionaries
 // -------------------------------------------------------------------------
 
 const BString& require_string(const BDict& d, const std::string& key) {
     auto it = d.find(key);
     if (it == d.end())
-        throw std::runtime_error("metainfo: campo obrigatório ausente: '" + key + "'");
+        throw std::runtime_error("metainfo: required field missing: '" + key + "'");
     if (!it->second.is_string())
-        throw std::runtime_error("metainfo: campo '" + key + "' não é string");
+        throw std::runtime_error("metainfo: field '" + key + "' is not a string");
     return it->second.as_string();
 }
 
 int64_t require_int(const BDict& d, const std::string& key) {
     auto it = d.find(key);
     if (it == d.end())
-        throw std::runtime_error("metainfo: campo obrigatório ausente: '" + key + "'");
+        throw std::runtime_error("metainfo: required field missing: '" + key + "'");
     if (!it->second.is_int())
-        throw std::runtime_error("metainfo: campo '" + key + "' não é inteiro");
+        throw std::runtime_error("metainfo: field '" + key + "' is not an integer");
     return it->second.as_int();
 }
 
 // -------------------------------------------------------------------------
-// Parse dos hashes de peças
+// Parse piece hashes
 // -------------------------------------------------------------------------
 
 std::vector<SHA1::Digest> parse_piece_hashes(const std::string& pieces_raw) {
     if (pieces_raw.size() % 20 != 0)
         throw std::runtime_error(
-            "metainfo: campo 'pieces' tem comprimento inválido: " +
-            std::to_string(pieces_raw.size()) + " (não é múltiplo de 20)");
+            "metainfo: 'pieces' field has invalid length: " +
+            std::to_string(pieces_raw.size()) + " (not a multiple of 20)");
 
     size_t count = pieces_raw.size() / 20;
     std::vector<SHA1::Digest> hashes(count);
@@ -139,7 +139,7 @@ std::vector<SHA1::Digest> parse_piece_hashes(const std::string& pieces_raw) {
 }
 
 // -------------------------------------------------------------------------
-// Parse da lista de arquivos (modo multi-file)
+// Parse file list (multi-file mode)
 // -------------------------------------------------------------------------
 
 std::vector<FileEntry> parse_files(const BList& files_list) {
@@ -149,7 +149,7 @@ std::vector<FileEntry> parse_files(const BList& files_list) {
 
     for (const BValue& file_bv : files_list) {
         if (!file_bv.is_dict())
-            throw std::runtime_error("metainfo: entrada de arquivo não é dict");
+            throw std::runtime_error("metainfo: file entry is not a dict");
 
         const BDict& fd = file_bv.as_dict();
         FileEntry f;
@@ -158,14 +158,14 @@ std::vector<FileEntry> parse_files(const BList& files_list) {
         f.offset = offset;
         offset  += f.length;
 
-        // path é uma lista de strings (componentes do caminho)
+        // path is a list of strings (path components)
         auto path_it = fd.find("path");
         if (path_it == fd.end() || !path_it->second.is_list())
-            throw std::runtime_error("metainfo: arquivo sem 'path'");
+            throw std::runtime_error("metainfo: file missing 'path'");
 
         for (const BValue& comp : path_it->second.as_list()) {
             if (!comp.is_string())
-                throw std::runtime_error("metainfo: componente de path não é string");
+                throw std::runtime_error("metainfo: path component is not a string");
             f.path.push_back(comp.as_string());
         }
 
@@ -175,26 +175,26 @@ std::vector<FileEntry> parse_files(const BList& files_list) {
     return result;
 }
 
-} // namespace anônimo
+} // anonymous namespace
 
 // =============================================================================
-// Metainfo::parse — ponto de entrada público
+// Metainfo::parse — public entry point
 // =============================================================================
 
 Metainfo Metainfo::parse(const std::string& raw) {
     BValue root = decode(raw);
     if (!root.is_dict())
-        throw std::runtime_error("metainfo: raiz não é um dicionário");
+        throw std::runtime_error("metainfo: root is not a dictionary");
 
     const BDict& top = root.as_dict();
     Metainfo m;
 
     // -------------------------------------------------------------------------
-    // Campos do nível raiz
+    // Root-level fields
     // -------------------------------------------------------------------------
     m.announce = require_string(top, "announce");
 
-    // announce-list (BEP 12) — opcional
+    // announce-list (BEP 12) — optional
     auto al_it = top.find("announce-list");
     if (al_it != top.end() && al_it->second.is_list()) {
         for (const BValue& tier_bv : al_it->second.as_list()) {
@@ -208,17 +208,17 @@ Metainfo Metainfo::parse(const std::string& raw) {
     }
 
     // -------------------------------------------------------------------------
-    // info_hash: SHA1 dos bytes brutos do info dict
+    // info_hash: SHA1 of the raw info dict bytes
     // -------------------------------------------------------------------------
     std::string_view raw_info = find_raw_info(raw);
     m.info_hash = SHA1::hash(raw_info.data(), raw_info.size());
 
     // -------------------------------------------------------------------------
-    // Parse do info dict
+    // Parse the info dict
     // -------------------------------------------------------------------------
     auto info_it = top.find("info");
     if (info_it == top.end() || !info_it->second.is_dict())
-        throw std::runtime_error("metainfo: 'info' ausente ou inválido");
+        throw std::runtime_error("metainfo: 'info' missing or invalid");
 
     const BDict& info = info_it->second.as_dict();
 
@@ -234,32 +234,32 @@ Metainfo Metainfo::parse(const std::string& raw) {
     auto files_it  = info.find("files");
 
     if (length_it != info.end() && length_it->second.is_int()) {
-        // Modo single-file: um único arquivo, path é vazio (usa-se name)
+        // Single-file mode: one file with empty path (use `name` as filename)
         FileEntry f;
         f.length = length_it->second.as_int();
         f.offset = 0;
-        // path vazio — indica single-file ao código consumidor
+        // Empty path — signals single-file to consuming code
         m.total_length = f.length;
         m.files.push_back(std::move(f));
 
     } else if (files_it != info.end() && files_it->second.is_list()) {
-        // Modo multi-file
+        // Multi-file mode
         m.files = parse_files(files_it->second.as_list());
         m.total_length = 0;
         for (const FileEntry& f : m.files) m.total_length += f.length;
 
     } else {
         throw std::runtime_error(
-            "metainfo: info dict não tem 'length' (single-file) nem 'files' (multi-file)");
+            "metainfo: info dict has neither 'length' (single-file) nor 'files' (multi-file)");
     }
 
-    // Sanidade: número de peças deve corresponder ao tamanho total
+    // Sanity check: piece count must match total size
     size_t expected_pieces =
         static_cast<size_t>((m.total_length + m.piece_length - 1) / m.piece_length);
     if (m.piece_hashes.size() != expected_pieces) {
         throw std::runtime_error(
-            "metainfo: número de peças inconsistente: esperado " +
-            std::to_string(expected_pieces) + ", obtido " +
+            "metainfo: inconsistent piece count: expected " +
+            std::to_string(expected_pieces) + ", got " +
             std::to_string(m.piece_hashes.size()));
     }
 

@@ -1,14 +1,14 @@
 // =============================================================================
-// ui/renderer.cpp — Implementação da UI para PS4 homebrew
+// ui/renderer.cpp — PS4 homebrew UI implementation
 //
-// Usa sceUserService e scePad para input, e OrbisKernelDebugOutA
-// (mapeado via include do OpenOrbis) para output no debug log.
+// Uses sceUserService and scePad for input, and OrbisKernelDebugOutA
+// (mapped via an OpenOrbis include) for debug log output.
 // =============================================================================
 
 #include "ui/renderer.hpp"
 
-// Cabeçalhos PS4 via OpenOrbis
-// Estes arquivos existem em $OO_PS4_TOOLCHAIN/include/
+// PS4 headers via OpenOrbis
+// These files exist at $OO_PS4_TOOLCHAIN/include/
 #include <orbis/UserService.h>
 #include <orbis/Pad.h>
 
@@ -16,15 +16,15 @@
 #include <cstring>
 #include <cmath>
 
-// No OpenOrbis, printf() grava no OrbisKernelDebugOutA automaticamente
-// via musl + libkernel hook quando rodando com ps4debug ativo.
+// In OpenOrbis, printf() writes to OrbisKernelDebugOutA automatically
+// via musl + libkernel hooks when running with ps4debug active.
 #define PS4_LOG(...) printf(__VA_ARGS__)
 
 namespace bt {
 namespace ui {
 
 // =============================================================================
-// Estado do sistema de input
+// Input system state
 // =============================================================================
 
 static int32_t  g_user_id    = -1;
@@ -36,41 +36,41 @@ static bool     g_services_ok = false;
 // =============================================================================
 
 void init_system_services() {
-    // Inicializa o UserService (necessário para obter o userId para o Pad)
+    // Initialize UserService (required to get the userId for Pad)
     int32_t ret = sceUserServiceInitialize(nullptr);
     if (ret != 0) {
-        PS4_LOG("[ui] sceUserServiceInitialize falhou: 0x%08X\n", ret);
+        PS4_LOG("[ui] sceUserServiceInitialize failed: 0x%08X\n", ret);
         return;
     }
 
-    // Obtém o ID do usuário inicial (primeiro usuário logado)
+    // Get the initial user ID (first logged-in user)
     ret = sceUserServiceGetInitialUser(&g_user_id);
     if (ret != 0) {
-        PS4_LOG("[ui] sceUserServiceGetInitialUser falhou: 0x%08X\n", ret);
+        PS4_LOG("[ui] sceUserServiceGetInitialUser failed: 0x%08X\n", ret);
         return;
     }
 
-    // Inicializa o módulo de Pad (controle)
+    // Initialize the Pad (controller) module
     ret = scePadInit();
     if (ret != 0) {
-        PS4_LOG("[ui] scePadInit falhou: 0x%08X\n", ret);
+        PS4_LOG("[ui] scePadInit failed: 0x%08X\n", ret);
         return;
     }
 
-    // Abre o controle do usuário (tipo 0 = DualShock 4)
+    // Open the user's controller (type 0 = DualShock 4)
     g_pad_handle = scePadOpen(g_user_id, ORBIS_PAD_PORT_TYPE_STANDARD, 0, nullptr);
     if (g_pad_handle < 0) {
-        PS4_LOG("[ui] scePadOpen falhou: 0x%08X\n", g_pad_handle);
+        PS4_LOG("[ui] scePadOpen failed: 0x%08X\n", g_pad_handle);
         return;
     }
 
     g_services_ok = true;
-    PS4_LOG("[ui] Serviços do sistema inicializados. UserID=%d PadHandle=%d\n",
+    PS4_LOG("[ui] System services initialized. UserID=%d PadHandle=%d\n",
             g_user_id, g_pad_handle);
 }
 
 // =============================================================================
-// check_cancel_button — verifica pressionamento do botão Circle (O)
+// check_cancel_button — checks Circle (O) button press
 // =============================================================================
 
 bool check_cancel_button() {
@@ -80,12 +80,12 @@ bool check_cancel_button() {
     int32_t ret = scePadReadState(g_pad_handle, &pad_data);
     if (ret != 0) return false;
 
-    // ORBIS_PAD_BUTTON_CIRCLE = botão O (cancelar/voltar no layout JP/BR)
+    // ORBIS_PAD_BUTTON_CIRCLE = Circle button (cancel/back on JP/BR layout)
     return (pad_data.buttons & ORBIS_PAD_BUTTON_CIRCLE) != 0;
 }
 
 // =============================================================================
-// Formatação
+// Formatting
 // =============================================================================
 
 std::string format_bytes(int64_t bytes) {
@@ -129,24 +129,24 @@ void render_progress(
     int64_t            total_size,
     const ProgressInfo& info)
 {
-    // Limpa a tela de debug emitindo várias linhas em branco
-    // (em UART/ps4debug não há escape codes de terminal garantidos)
+    // Clear the debug screen by emitting several blank lines
+    // (UART/ps4debug has no guaranteed terminal escape codes)
     PS4_LOG("\n\n\n");
     PS4_LOG("============================================================\n");
     PS4_LOG("  PS4 Torrent v0.1\n");
     PS4_LOG("============================================================\n");
-    PS4_LOG("  Arquivo  : %s\n", torrent_name.c_str());
-    PS4_LOG("  Tamanho  : %s\n", format_bytes(total_size).c_str());
+    PS4_LOG("  File     : %s\n", torrent_name.c_str());
+    PS4_LOG("  Size     : %s\n", format_bytes(total_size).c_str());
     PS4_LOG("\n");
     PS4_LOG("  %s %.1f%%\n", progress_bar(info.pct).c_str(), info.pct);
-    PS4_LOG("  Baixados : %s / %s\n",
+    PS4_LOG("  Downloaded: %s / %s\n",
             format_bytes(info.bytes_done).c_str(),
             format_bytes(info.bytes_total).c_str());
-    PS4_LOG("  Velocidade: %s\n", format_speed(info.speed_bps).c_str());
+    PS4_LOG("  Speed    : %s\n", format_speed(info.speed_bps).c_str());
     PS4_LOG("  Peers    : %d  Seeders: %d  Leechers: %d\n",
             info.peers_active, info.seeders, info.leechers);
     PS4_LOG("\n");
-    PS4_LOG("  [O] Cancelar\n");
+    PS4_LOG("  [O] Cancel\n");
     PS4_LOG("============================================================\n");
 }
 
@@ -157,7 +157,7 @@ void render_progress(
 void render_error(const std::string& message) {
     PS4_LOG("\n");
     PS4_LOG("============================================================\n");
-    PS4_LOG("  PS4 Torrent v0.1  --  ERRO\n");
+    PS4_LOG("  PS4 Torrent v0.1  --  ERROR\n");
     PS4_LOG("============================================================\n");
     PS4_LOG("  %s\n", message.c_str());
     PS4_LOG("============================================================\n");
@@ -172,14 +172,14 @@ void render_complete(const std::string& torrent_name, int64_t total_bytes, doubl
 
     PS4_LOG("\n\n");
     PS4_LOG("============================================================\n");
-    PS4_LOG("  PS4 Torrent v0.1  --  CONCLUIDO!\n");
+    PS4_LOG("  PS4 Torrent v0.1  --  COMPLETE!\n");
     PS4_LOG("============================================================\n");
-    PS4_LOG("  Arquivo  : %s\n", torrent_name.c_str());
+    PS4_LOG("  File     : %s\n", torrent_name.c_str());
     PS4_LOG("  Total    : %s\n", format_bytes(total_bytes).c_str());
-    PS4_LOG("  Tempo    : %.0f segundos\n", elapsed_sec);
-    PS4_LOG("  Velocidade media: %s\n", format_speed(avg_speed).c_str());
+    PS4_LOG("  Time     : %.0f seconds\n", elapsed_sec);
+    PS4_LOG("  Avg speed: %s\n", format_speed(avg_speed).c_str());
     PS4_LOG("\n");
-    PS4_LOG("  Pressione [X] para sair.\n");
+    PS4_LOG("  Press [X] to exit.\n");
     PS4_LOG("============================================================\n");
 }
 

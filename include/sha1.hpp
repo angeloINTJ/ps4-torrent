@@ -1,15 +1,16 @@
-#pragma once
 // =============================================================================
-// sha1.hpp — SHA1 header-only, baseada no RFC 3174
+// sha1.hpp — SHA1 header-only, based on RFC 3174
 //
-// Sem dependências externas. Funciona com o musl libc do OpenOrbis.
-// Uso:
+// Zero external dependencies. Works with the OpenOrbis musl libc.
+// Usage:
 //   auto digest = bt::SHA1::hash(data, len);
-//   // ou incremental:
+//   // or incremental:
 //   bt::SHA1 ctx;
 //   ctx.update(ptr, size);
 //   auto d = ctx.finalize();
 // =============================================================================
+
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -20,19 +21,19 @@ namespace bt {
 
 class SHA1 {
 public:
-    // SHA1 produz 160 bits = 20 bytes
+    // SHA1 produces 160 bits = 20 bytes
     static constexpr size_t DIGEST_SIZE = 20;
     using Digest = std::array<uint8_t, DIGEST_SIZE>;
 
     SHA1() noexcept { reset(); }
 
     // -------------------------------------------------------------------------
-    // Reinicia o contexto para reutilização
+    // Reset context for reuse
     // -------------------------------------------------------------------------
     void reset() noexcept {
         count_    = 0;
         buf_used_ = 0;
-        // Valores iniciais definidos pelo padrão SHA1
+        // Initial values defined by the SHA1 standard
         state_[0] = 0x67452301u;
         state_[1] = 0xEFCDAB89u;
         state_[2] = 0x98BADCFEu;
@@ -41,13 +42,13 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // Alimenta bytes ao contexto (pode ser chamado múltiplas vezes)
+    // Feed bytes into the context (may be called multiple times)
     // -------------------------------------------------------------------------
     void update(const void* data, size_t len) noexcept {
         const uint8_t* ptr = static_cast<const uint8_t*>(data);
         count_ += len;
 
-        // Completa um bloco parcial se houver bytes no buffer interno
+        // Complete a partial block if there are bytes in the internal buffer
         if (buf_used_ > 0) {
             size_t space = BLOCK_SIZE - buf_used_;
             size_t fill  = (len < space) ? len : space;
@@ -62,14 +63,14 @@ public:
             }
         }
 
-        // Processa blocos completos diretamente do input (zero-copy)
+        // Process full blocks directly from input (zero-copy)
         while (len >= BLOCK_SIZE) {
             compress(ptr);
             ptr += BLOCK_SIZE;
             len -= BLOCK_SIZE;
         }
 
-        // Salva bytes restantes no buffer
+        // Save remaining bytes in the buffer
         if (len > 0) {
             std::memcpy(buf_, ptr, len);
             buf_used_ = len;
@@ -77,24 +78,24 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // Finaliza e retorna o digest. NÃO reutilize o contexto após esta chamada
-    // sem chamar reset() primeiro.
+    // Finalize and return the digest. Do NOT reuse the context after this call
+    // without calling reset() first.
     // -------------------------------------------------------------------------
     Digest finalize() noexcept {
-        // Padding: bit 1 seguido de zeros até 56 mod 64 bytes, depois tamanho em bits
+        // Padding: bit 1 followed by zeros up to 56 mod 64 bytes, then bit length
         uint64_t bit_count_be = to_big_endian_64(count_ * 8);
 
         uint8_t pad = 0x80;
         update(&pad, 1);
 
-        // Preenche até restar 8 bytes no bloco (para o bit count)
+        // Pad until 8 bytes remain in the block (for the bit count)
         uint8_t zero = 0;
         while (buf_used_ != 56) update(&zero, 1);
 
-        // Anexa tamanho em bits (big-endian, 8 bytes)
+        // Append bit count (big-endian, 8 bytes)
         update(&bit_count_be, 8);
 
-        // Serializa estado em big-endian
+        // Serialize state in big-endian
         Digest d;
         for (int i = 0; i < 5; ++i) {
             d[i * 4 + 0] = (state_[i] >> 24) & 0xFF;
@@ -106,7 +107,7 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // One-shot: hash de dados em memória
+    // One-shot: hash in-memory data
     // -------------------------------------------------------------------------
     static Digest hash(const void* data, size_t len) noexcept {
         SHA1 ctx;
@@ -118,7 +119,7 @@ public:
         return hash(s.data(), s.size());
     }
 
-    // Compara dois digests de forma segura (sem early-exit para evitar timing attacks)
+    // Constant-time digest comparison (prevents timing attacks)
     static bool equal(const Digest& a, const Digest& b) noexcept {
         uint8_t diff = 0;
         for (size_t i = 0; i < DIGEST_SIZE; ++i) diff |= a[i] ^ b[i];
@@ -129,17 +130,17 @@ private:
     static constexpr size_t BLOCK_SIZE = 64;
 
     uint32_t state_[5];
-    uint64_t count_;        // Total de bytes processados
+    uint64_t count_;        // Total bytes processed
     uint8_t  buf_[BLOCK_SIZE];
     size_t   buf_used_;
 
-    // Rotação circular à esquerda de 32 bits
+    // 32-bit left circular rotation
     static uint32_t rotl(uint32_t v, int n) noexcept {
         return (v << n) | (v >> (32 - n));
     }
 
     static uint64_t to_big_endian_64(uint64_t v) noexcept {
-        // Troca bytes se necessário (PS4 é little-endian x86_64)
+        // Byte swap if needed (PS4 is little-endian x86_64)
         return ((v & 0x00000000000000FFull) << 56) |
                ((v & 0x000000000000FF00ull) << 40) |
                ((v & 0x0000000000FF0000ull) << 24) |
@@ -151,10 +152,10 @@ private:
     }
 
     // -------------------------------------------------------------------------
-    // Compressão SHA1 de um bloco de 64 bytes
+    // SHA1 block compression (64 bytes)
     // -------------------------------------------------------------------------
     void compress(const uint8_t* block) noexcept {
-        // Expande os 16 words do bloco para 80
+        // Expand the 16 block words to 80
         uint32_t w[80];
         for (int i = 0; i < 16; ++i) {
             w[i] = (static_cast<uint32_t>(block[i * 4 + 0]) << 24) |
@@ -169,7 +170,7 @@ private:
         uint32_t a = state_[0], b = state_[1], c = state_[2],
                  d = state_[3], e = state_[4];
 
-        // Quatro rodadas de 20 operações cada
+        // Four rounds of 20 operations each
         for (int i = 0; i < 80; ++i) {
             uint32_t f, k;
             if      (i < 20) { f = (b & c) | (~b & d);           k = 0x5A827999u; }

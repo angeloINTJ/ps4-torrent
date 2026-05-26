@@ -1,14 +1,15 @@
-#pragma once
 // =============================================================================
-// bencode.hpp — Decoder e encoder do formato Bencode (BEP 3)
+// bencode.hpp — Bencode format decoder and encoder (BEP 3)
 //
-// Bencode é o formato de serialização usado em arquivos .torrent e no
-// protocolo tracker. Suporta quatro tipos:
-//   - Inteiro:     i<número>e          → ex: i42e
-//   - String:      <len>:<bytes>       → ex: 4:spam
-//   - Lista:       l<items>e           → ex: li1e4:spame
-//   - Dicionário:  d<key-value...>e    → ex: d3:fooi1ee  (keys sempre strings)
+// Bencode is the serialization format used in .torrent files and the
+// tracker protocol. Supports four types:
+//   - Integer:    i<number>e        → e.g. i42e
+//   - String:     <len>:<bytes>     → e.g. 4:spam
+//   - List:       l<items>e         → e.g. li1e4:spame
+//   - Dictionary: d<key-value...>e  → e.g. d3:fooi1ee  (keys are always strings)
 // =============================================================================
+
+#pragma once
 
 #include <cstdint>
 #include <map>
@@ -20,26 +21,26 @@
 
 namespace bt {
 
-// Declaração forward para o tipo recursivo
+// Forward declaration for the recursive type
 struct BValue;
 
 using BInt    = int64_t;
 using BString = std::string;
 using BList   = std::vector<BValue>;
-using BDict   = std::map<BString, BValue>;   // Map ordenado — bencode exige keys em ordem
+using BDict   = std::map<BString, BValue>;   // Ordered map — bencode requires sorted keys
 
 /**
- * Union tipada que representa qualquer valor bencode.
+ * Tagged union representing any bencode value.
  *
- * Usa std::variant para acesso type-safe sem alocação extra.
- * Para criar: BValue v = BString("hello");
- * Para ler:   v.as_string()  ou  std::get<BString>(v.data)
+ * Uses std::variant for type-safe access with no extra allocation.
+ * Create: BValue v = BString("hello");
+ * Read:   v.as_string()  or  std::get<BString>(v.data)
  */
 struct BValue {
     std::variant<BInt, BString, BList, BDict> data;
 
     // -------------------------------------------------------------------------
-    // Construtores
+    // Constructors
     // -------------------------------------------------------------------------
     BValue() = default;
     explicit BValue(BInt v)    : data(v)             {}
@@ -47,11 +48,11 @@ struct BValue {
     explicit BValue(BList v)   : data(std::move(v))  {}
     explicit BValue(BDict v)   : data(std::move(v))  {}
 
-    // Conveniência para literais inteiros
+    // Convenience for integer literals
     explicit BValue(int v)      : data(static_cast<BInt>(v)) {}
 
     // -------------------------------------------------------------------------
-    // Predicados de tipo
+    // Type predicates
     // -------------------------------------------------------------------------
     bool is_int()    const noexcept { return std::holds_alternative<BInt>(data);    }
     bool is_string() const noexcept { return std::holds_alternative<BString>(data); }
@@ -59,7 +60,7 @@ struct BValue {
     bool is_dict()   const noexcept { return std::holds_alternative<BDict>(data);   }
 
     // -------------------------------------------------------------------------
-    // Accessors — lançam std::bad_variant_access se o tipo não bater
+    // Accessors — throw std::bad_variant_access on type mismatch
     // -------------------------------------------------------------------------
     BInt&          as_int()    { return std::get<BInt>(data);    }
     BString&       as_string() { return std::get<BString>(data); }
@@ -73,25 +74,25 @@ struct BValue {
 };
 
 // =============================================================================
-// API pública
+// Public API
 // =============================================================================
 
 /**
- * Decodifica um buffer bencoded e retorna o BValue raiz.
+ * Decode a bencoded buffer and return the root BValue.
  *
- * @param data   Buffer de entrada (pode conter bytes nulos — usa string_view)
- * @throws std::runtime_error   em entrada malformada
+ * @param data   Input buffer (may contain null bytes — uses string_view)
+ * @throws std::runtime_error   on malformed input
  */
 BValue decode(std::string_view data);
 
 /**
- * Codifica um BValue para bytes bencode.
- * Dicionários são emitidos com keys em ordem lexicográfica (garantido por std::map).
+ * Encode a BValue to bencode bytes.
+ * Dictionaries are emitted with lexicographically ordered keys (guaranteed by std::map).
  */
 std::string encode(const BValue& val);
 
 /**
- * Versão de encode que grava em um buffer existente (evita alocação extra).
+ * Encode variant that writes into an existing buffer (avoids extra allocation).
  */
 void encode_into(const BValue& val, std::string& out);
 

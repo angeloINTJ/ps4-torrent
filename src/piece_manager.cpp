@@ -1,5 +1,5 @@
 // =============================================================================
-// piece_manager.cpp — Implementação do gerenciador de peças
+// piece_manager.cpp — Piece manager implementation
 // =============================================================================
 
 #include "piece_manager.hpp"
@@ -16,20 +16,20 @@
 namespace bt {
 
 // =============================================================================
-// Constantes
+// Constants
 // =============================================================================
 
 static constexpr uint32_t BLOCK_SIZE = 16 * 1024; // 16 KiB
 
 // =============================================================================
-// Construtor
+// Constructor
 // =============================================================================
 
 PieceManager::PieceManager(const Metainfo& meta, const std::string& save_dir)
     : meta_(meta)
     , save_dir_(save_dir)
 {
-    // Pré-aloca a estrutura de cada peça
+    // Pre-allocate the structure for each piece
     pieces_.reserve(meta.num_pieces());
 
     for (size_t i = 0; i < meta.num_pieces(); ++i) {
@@ -38,7 +38,7 @@ PieceManager::PieceManager(const Metainfo& meta, const std::string& save_dir)
         pieces_.emplace_back(static_cast<uint32_t>(i), ps, num_blocks);
     }
 
-    // Cria diretórios e pré-aloca arquivos no sistema de arquivos
+    // Create directories and pre-allocate files on the filesystem
     allocate_files();
 }
 
@@ -58,29 +58,29 @@ bool PieceManager::receive_block(
 
     Piece& p = pieces_[piece_index];
 
-    // Ignora blocos de peças já completas ou em falha de hash sendo reprocessadas
+    // Ignore blocks for pieces already complete or being reprocessed after hash failure
     if (p.status == PieceStatus::Complete) return false;
 
-    // Valida offset e tamanho
+    // Validate offset and size
     if (begin + data.size() > p.data.size())
         return false;
 
-    // Determina o índice do bloco
+    // Determine the block index
     uint32_t block_idx = begin / BLOCK_SIZE;
     if (block_idx >= p.blocks_received.size())
         return false;
 
-    // Copia o bloco para o buffer da peça
+    // Copy the block into the piece buffer
     std::memcpy(p.data.data() + begin, data.data(), data.size());
 
-    // Marca o bloco como recebido (só conta uma vez)
+    // Mark the block as received (only count once)
     if (!p.blocks_received[block_idx]) {
         p.blocks_received[block_idx] = true;
         ++p.blocks_done;
         p.status = PieceStatus::Pending;
     }
 
-    // Verifica se todos os blocos chegaram
+    // Check if all blocks have arrived
     if (p.blocks_done == p.blocks_received.size()) {
         return verify_and_flush(p);
     }
@@ -93,11 +93,11 @@ bool PieceManager::receive_block(
 // =============================================================================
 
 bool PieceManager::verify_and_flush(Piece& p) {
-    // Calcula SHA1 dos dados acumulados
+    // Compute SHA1 of the accumulated data
     SHA1::Digest actual = SHA1::hash(p.data.data(), p.data.size());
 
     if (!SHA1::equal(actual, meta_.piece_hashes[p.index])) {
-        // Hash falhou — reseta a peça para redownload
+        // Hash mismatch — reset the piece for re-download
         p.status       = PieceStatus::HashFail;
         p.blocks_done  = 0;
         std::fill(p.blocks_received.begin(), p.blocks_received.end(), false);
@@ -105,10 +105,10 @@ bool PieceManager::verify_and_flush(Piece& p) {
         return false;
     }
 
-    // Grava no disco
+    // Write to disk
     write_piece(p.index, p.data);
 
-    // Libera a memória do buffer (não precisamos mais dos dados)
+    // Free the buffer memory (data no longer needed)
     p.data.clear();
     p.data.shrink_to_fit();
     p.status = PieceStatus::Complete;
@@ -118,35 +118,35 @@ bool PieceManager::verify_and_flush(Piece& p) {
 }
 
 // =============================================================================
-// write_piece — grava uma peça nos arquivos corretos (single ou multi-file)
+// write_piece — write a piece to the correct files (single or multi-file)
 // =============================================================================
 
 void PieceManager::write_piece(uint32_t piece_index, const std::vector<uint8_t>& data) {
-    // Offset global desta peça no stream de bytes concatenados
+    // Global offset of this piece in the concatenated byte stream
     int64_t piece_global_begin = static_cast<int64_t>(piece_index) * meta_.piece_length;
     int64_t piece_global_end   = piece_global_begin + static_cast<int64_t>(data.size());
 
-    // Itera pelos arquivos que se sobrepõem com o range desta peça
+    // Iterate over files that overlap with this piece's range
     for (const FileEntry& file : meta_.files) {
         int64_t file_begin = file.offset;
         int64_t file_end   = file.offset + file.length;
 
-        // Sem sobreposição com esta peça?
+        // No overlap with this piece?
         if (file_end <= piece_global_begin) continue;
-        if (file_begin >= piece_global_end) break;  // Arquivos estão ordenados por offset
+        if (file_begin >= piece_global_end) break;  // Files are sorted by offset
 
-        // Intervalo de sobreposição em coordenadas globais
+        // Overlap interval in global coordinates
         int64_t overlap_begin = std::max(piece_global_begin, file_begin);
         int64_t overlap_end   = std::min(piece_global_end,   file_end);
 
-        // Offset dentro do buffer da peça
+        // Offset within the piece buffer
         int64_t piece_offset = overlap_begin - piece_global_begin;
-        // Offset dentro do arquivo
+        // Offset within the file
         int64_t file_offset  = overlap_begin - file_begin;
-        // Número de bytes a gravar
+        // Number of bytes to write
         int64_t write_len    = overlap_end - overlap_begin;
 
-        // Monta o caminho completo do arquivo
+        // Build the full file path
         std::string path = save_dir_;
         if (meta_.is_single_file()) {
             path += '/' + meta_.name;
@@ -154,25 +154,25 @@ void PieceManager::write_piece(uint32_t piece_index, const std::vector<uint8_t>&
             path += '/' + file.path_str();
         }
 
-        // Abre o arquivo para escrita (deve já existir após allocate_files)
+        // Open the file for writing (must already exist after allocate_files)
         int fd = ::open(path.c_str(), O_WRONLY);
         if (fd < 0)
-            throw std::runtime_error("piece_manager: falha ao abrir para escrita: " + path);
+            throw std::runtime_error("piece_manager: failed to open for writing: " + path);
 
-        // Posiciona o cursor no offset correto
+        // Seek to the correct offset
         if (::lseek(fd, static_cast<off_t>(file_offset), SEEK_SET) < 0) {
             ::close(fd);
-            throw std::runtime_error("piece_manager: lseek() falhou em: " + path);
+            throw std::runtime_error("piece_manager: lseek() failed on: " + path);
         }
 
-        // Grava com loop para lidar com writes parciais
+        // Write with loop to handle partial writes
         const uint8_t* src     = data.data() + piece_offset;
         size_t         rem     = static_cast<size_t>(write_len);
         while (rem > 0) {
             ssize_t written = ::write(fd, src, rem);
             if (written <= 0) {
                 ::close(fd);
-                throw std::runtime_error("piece_manager: write() falhou em: " + path);
+                throw std::runtime_error("piece_manager: write() failed on: " + path);
             }
             src += written;
             rem -= static_cast<size_t>(written);
@@ -183,15 +183,15 @@ void PieceManager::write_piece(uint32_t piece_index, const std::vector<uint8_t>&
 }
 
 // =============================================================================
-// allocate_files — cria diretórios e arquivos esparsos
+// allocate_files — create directories and sparse files
 // =============================================================================
 
-// Helper: cria um diretório e todos os pais necessários (mkdir -p)
+// Helper: create a directory and all parents (mkdir -p)
 static void mkdir_p(const std::string& path) {
     for (size_t i = 1; i <= path.size(); ++i) {
         if (i == path.size() || path[i] == '/') {
             std::string sub = path.substr(0, i);
-            ::mkdir(sub.c_str(), 0755); // Ignora erro se já existe
+            ::mkdir(sub.c_str(), 0755); // Ignore error if already exists
         }
     }
 }
@@ -201,12 +201,12 @@ void PieceManager::allocate_files() {
         mkdir_p(save_dir_);
 
         std::string path = save_dir_ + '/' + meta_.name;
-        // Cria o arquivo e define o tamanho via lseek + write de 1 byte
+        // Create the file and set its size via lseek + 1-byte write
         int fd = ::open(path.c_str(), O_CREAT | O_WRONLY, 0644);
         if (fd < 0)
-            throw std::runtime_error("piece_manager: não foi possível criar: " + path);
+            throw std::runtime_error("piece_manager: could not create: " + path);
 
-        // truncate: posiciona no último byte e escreve zero
+        // Truncate: seek to the last byte and write zero
         if (meta_.total_length > 0) {
             ::lseek(fd, static_cast<off_t>(meta_.total_length - 1), SEEK_SET);
             uint8_t zero = 0;
@@ -215,9 +215,9 @@ void PieceManager::allocate_files() {
         ::close(fd);
 
     } else {
-        // Multi-file: cria estrutura de diretórios e um arquivo por entrada
+        // Multi-file: create directory structure and one file per entry
         for (const FileEntry& file : meta_.files) {
-            // Reconstrói o caminho completo do arquivo
+            // Reconstruct the full file path
             std::string dir_path = save_dir_ + '/' + meta_.name;
             std::string file_path = dir_path;
 
@@ -233,7 +233,7 @@ void PieceManager::allocate_files() {
             int fd = ::open(file_path.c_str(), O_CREAT | O_WRONLY, 0644);
             if (fd < 0)
                 throw std::runtime_error(
-                    "piece_manager: não foi possível criar: " + file_path);
+                    "piece_manager: could not create: " + file_path);
 
             if (file.length > 0) {
                 ::lseek(fd, static_cast<off_t>(file.length - 1), SEEK_SET);
@@ -246,7 +246,7 @@ void PieceManager::allocate_files() {
 }
 
 // =============================================================================
-// next_request — seleciona próximo bloco a solicitar
+// next_request — select the next block to request
 // =============================================================================
 
 std::optional<BlockRequest> PieceManager::next_request(
@@ -255,19 +255,19 @@ std::optional<BlockRequest> PieceManager::next_request(
     std::lock_guard<std::mutex> lock(mutex_);
 
     for (const Piece& p : pieces_) {
-        // Pula peças completas
+        // Skip completed pieces
         if (p.status == PieceStatus::Complete) continue;
 
-        // O peer tem esta peça?
+        // Does the peer have this piece?
         if (!peer_has_piece(peer_bitfield, p.index)) continue;
 
-        // Procura o primeiro bloco não recebido
+        // Find the first unreceived block
         for (size_t bi = 0; bi < p.blocks_received.size(); ++bi) {
             if (p.blocks_received[bi]) continue;
 
             uint32_t begin = static_cast<uint32_t>(bi) * BLOCK_SIZE;
 
-            // Tamanho do bloco: pode ser menor no último bloco da última peça
+            // Block size: may be smaller for the last block of the last piece
             int64_t  piece_sz    = meta_.piece_size(p.index);
             int64_t  remaining   = piece_sz - static_cast<int64_t>(begin);
             uint32_t block_len   = static_cast<uint32_t>(
@@ -277,7 +277,7 @@ std::optional<BlockRequest> PieceManager::next_request(
         }
     }
 
-    return std::nullopt; // Nada a solicitar
+    return std::nullopt; // Nothing to request
 }
 
 // =============================================================================
@@ -287,13 +287,13 @@ std::optional<BlockRequest> PieceManager::next_request(
 std::vector<uint8_t> PieceManager::our_bitfield() const {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    // 1 bit por peça, arredondado para cima para bytes
+    // 1 bit per piece, rounded up to bytes
     size_t num_bytes = (pieces_.size() + 7) / 8;
     std::vector<uint8_t> bf(num_bytes, 0);
 
     for (size_t i = 0; i < pieces_.size(); ++i) {
         if (pieces_[i].status == PieceStatus::Complete) {
-            // Bit na posição i: byte = i/8, bit = 7 - (i%8) (MSB first)
+            // Bit at position i: byte = i/8, bit = 7 - (i%8) (MSB first)
             bf[i / 8] |= static_cast<uint8_t>(0x80 >> (i % 8));
         }
     }
@@ -302,7 +302,7 @@ std::vector<uint8_t> PieceManager::our_bitfield() const {
 }
 
 // =============================================================================
-// Progresso
+// Progress
 // =============================================================================
 
 int64_t PieceManager::bytes_downloaded() const noexcept {

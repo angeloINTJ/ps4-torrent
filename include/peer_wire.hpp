@@ -1,16 +1,17 @@
+// =============================================================================
+// peer_wire.hpp — BitTorrent wire protocol (BEP 3)
+//
+// Manages a TCP connection with a peer, including:
+//   - Initial handshake
+//   - Sending and receiving typed messages
+//   - Choke/unchoke/interested state tracking
+//   - Block requests (request/piece)
+//
+// Each PeerConnection instance represents ONE connection to ONE peer.
+// For multiple peers, create multiple instances (usually in threads).
+// =============================================================================
+
 #pragma once
-// =============================================================================
-// peer_wire.hpp — Protocolo wire BitTorrent (BEP 3)
-//
-// Gerencia uma conexão TCP com um peer, incluindo:
-//   - Handshake inicial
-//   - Envio e recebimento de mensagens tipadas
-//   - Controle de choke/unchoke/interested
-//   - Solicitação de blocos (request/piece)
-//
-// Cada instância de PeerConnection representa UMA conexão com UM peer.
-// Para múltiplos peers, crie múltiplas instâncias (geralmente em threads).
-// =============================================================================
 
 #include "sha1.hpp"
 
@@ -22,7 +23,7 @@
 namespace bt {
 
 // =============================================================================
-// Tipos de mensagem do protocolo BitTorrent (BEP 3)
+// BitTorrent protocol message types (BEP 3)
 // =============================================================================
 
 enum class MsgType : uint8_t {
@@ -35,20 +36,20 @@ enum class MsgType : uint8_t {
     Request       = 6,
     Piece         = 7,
     Cancel        = 8,
-    // Extensões (não implementadas ainda):
+    // Extensions (not implemented yet):
     // Port       = 9,   // DHT (BEP 5)
 };
 
 /**
- * Mensagem recebida de um peer, já desserializada.
+ * Message received from a peer, already deserialized.
  *
- * Campos válidos dependem do tipo:
+ * Valid fields depend on the type:
  *   Have         → piece_index
  *   Bitfield     → bitfield
  *   Request      → piece_index, begin, length
  *   Piece        → piece_index, begin, block
  *   Cancel       → piece_index, begin, length
- *   Outros       → (sem payload)
+ *   Others       → (no payload)
  */
 struct PeerMessage {
     MsgType  type;
@@ -57,19 +58,19 @@ struct PeerMessage {
     uint32_t begin       = 0;
     uint32_t length      = 0;
 
-    std::vector<uint8_t> bitfield;  // Para Bitfield
-    std::vector<uint8_t> block;     // Para Piece (dados reais)
+    std::vector<uint8_t> bitfield;  // For Bitfield
+    std::vector<uint8_t> block;     // For Piece (actual data)
 };
 
 // =============================================================================
-// Estado local de um peer (flags de choke/interest)
+// Local peer state (choke/interest flags)
 // =============================================================================
 
 struct PeerState {
-    bool am_choking      = true;   // Nós estamos chokando o peer
-    bool am_interested   = false;  // Nós estamos interessados no peer
-    bool peer_choking    = true;   // O peer está nos chokando
-    bool peer_interested = false;  // O peer está interessado em nós
+    bool am_choking      = true;   // We are choking the peer
+    bool am_interested   = false;  // We are interested in the peer
+    bool peer_choking    = true;   // The peer is choking us
+    bool peer_interested = false;  // The peer is interested in us
 };
 
 // =============================================================================
@@ -77,28 +78,28 @@ struct PeerState {
 // =============================================================================
 
 /**
- * Conexão com um único peer BitTorrent.
+ * Connection to a single BitTorrent peer.
  *
- * Ciclo de vida típico:
+ * Typical lifecycle:
  *   1. connect(ip, port)
- *   2. handshake(info_hash, peer_id)  → retorna false se info_hash não bater
+ *   2. handshake(info_hash, peer_id)  → returns false on info_hash mismatch
  *   3. send_interested()
- *   4. Loop: read_message() → processa → send_request() → read_message() ...
+ *   4. Loop: read_message() → process → send_request() → read_message() ...
  *   5. disconnect()
  */
 class PeerConnection {
 public:
-    // Tamanho padrão de bloco: 16 KiB (padrão da spec BitTorrent)
+    // Default block size: 16 KiB (standard BitTorrent spec)
     static constexpr uint32_t BLOCK_SIZE = 16 * 1024;
 
     PeerConnection() = default;
     ~PeerConnection() { disconnect(); }
 
-    // Não-copiável (ownership do socket fd)
+    // Non-copyable (owns socket fd)
     PeerConnection(const PeerConnection&)            = delete;
     PeerConnection& operator=(const PeerConnection&) = delete;
 
-    // Movível
+    // Movable
     PeerConnection(PeerConnection&& o) noexcept
         : fd_(o.fd_), state_(o.state_), peer_id_(std::move(o.peer_id_))
     {
@@ -106,22 +107,22 @@ public:
     }
 
     // -------------------------------------------------------------------------
-    // Gerenciamento de conexão
+    // Connection management
     // -------------------------------------------------------------------------
 
     /**
-     * Conecta ao peer (TCP).
-     * ip em network byte order (como retornado pelo tracker).
-     * Lança std::runtime_error em falha.
+     * Connect to the peer (TCP).
+     * ip in network byte order (as returned by the tracker).
+     * Throws std::runtime_error on failure.
      */
     void connect(uint32_t ip, uint16_t port);
 
     /**
-     * Executa o handshake BitTorrent.
-     * Envia nosso handshake e verifica o do peer.
+     * Perform the BitTorrent handshake.
+     * Sends our handshake and validates the peer's.
      *
-     * @return true  — handshake OK, info_hash confere
-     * @return false — info_hash não confere (descarte a conexão)
+     * @return true  — handshake OK, info_hash matches
+     * @return false — info_hash mismatch (discard this connection)
      */
     bool handshake(const SHA1::Digest& info_hash, const std::string& our_peer_id);
 
@@ -130,20 +131,20 @@ public:
     bool is_connected() const noexcept { return fd_ >= 0; }
 
     // -------------------------------------------------------------------------
-    // Leitura de mensagens
+    // Reading messages
     // -------------------------------------------------------------------------
 
     /**
-     * Lê a próxima mensagem do peer.
+     * Read the next message from the peer.
      *
-     * @return std::nullopt  — keep-alive (mensagem de tamanho zero)
-     * @return PeerMessage   — mensagem recebida e desserializada
-     * @throws std::runtime_error em erro de protocolo ou socket
+     * @return std::nullopt  — keep-alive (zero-length message)
+     * @return PeerMessage   — received and deserialized message
+     * @throws std::runtime_error on protocol or socket error
      */
     std::optional<PeerMessage> read_message();
 
     // -------------------------------------------------------------------------
-    // Envio de mensagens (nomes autoexplicativos)
+    // Sending messages (self-explanatory names)
     // -------------------------------------------------------------------------
 
     void send_keepalive();
@@ -155,17 +156,17 @@ public:
     void send_bitfield(const std::vector<uint8_t>& bitfield);
 
     /**
-     * Solicita um bloco de dados ao peer.
+     * Request a block of data from the peer.
      *
-     * @param piece_index  Índice da peça (0-based)
-     * @param begin        Offset em bytes dentro da peça
-     * @param length       Tamanho do bloco (tipicamente BLOCK_SIZE, exceto o último)
+     * @param piece_index  Piece index (0-based)
+     * @param begin        Byte offset within the piece
+     * @param length       Block size (typically BLOCK_SIZE, except the last block)
      */
     void send_request(uint32_t piece_index, uint32_t begin, uint32_t length);
     void send_cancel (uint32_t piece_index, uint32_t begin, uint32_t length);
 
     // -------------------------------------------------------------------------
-    // Estado
+    // State
     // -------------------------------------------------------------------------
 
     const PeerState& state()   const noexcept { return state_;   }
@@ -174,25 +175,25 @@ public:
 private:
     int         fd_      = -1;
     PeerState   state_;
-    std::string peer_id_;  // 20-byte peer ID do peer remoto (obtido no handshake)
+    std::string peer_id_;  // 20-byte peer ID of the remote peer (from handshake)
 
     // -------------------------------------------------------------------------
-    // I/O de baixo nível
+    // Low-level I/O
     // -------------------------------------------------------------------------
 
-    // Envia exatamente `len` bytes (loop sobre send)
+    // Send exactly `len` bytes (loop over send)
     void send_raw(const void* data, size_t len);
 
-    // Recebe exatamente `len` bytes (loop sobre recv)
+    // Receive exactly `len` bytes (loop over recv)
     void recv_raw(void*  data, size_t len);
 
-    // Envia mensagem com prefixo de comprimento (4 bytes BE) + type byte + payload
+    // Send message with length prefix (4 bytes BE) + type byte + payload
     void send_msg(MsgType type, const uint8_t* payload = nullptr, size_t payload_len = 0);
 
-    // Lê uint32_t big-endian do socket
+    // Read uint32_t big-endian from socket
     uint32_t recv_u32();
 
-    // Escreve uint32_t big-endian no buffer
+    // Write uint32_t big-endian to buffer
     static void write_u32(uint8_t* buf, uint32_t v) noexcept;
 };
 

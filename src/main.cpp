@@ -1,27 +1,27 @@
 // =============================================================================
-// main.cpp — Ponto de entrada do homebrew PS4 Torrent
+// main.cpp — PS4 Torrent homebrew entry point
 //
-// Fluxo:
-//   1. Inicializa serviços do sistema (SCE UserService, Pad)
-//   2. Localiza o arquivo .torrent no USB/HDD
-//   3. Inicia a Session de download com callback de progresso
-//   4. Mantém o loop principal monitorando o controle
-//   5. Exibe tela de conclusão ou erro
+// Flow:
+//   1. Initialize system services (SCE UserService, Pad)
+//   2. Locate the .torrent file on USB/HDD
+//   3. Start the download Session with a progress callback
+//   4. Main loop monitors controller input
+//   5. Display completion or error screen
 //
-// Localização do .torrent:
-//   O app lê o primeiro arquivo .torrent encontrado em /data/pkg/torrents/
-//   (diretório montado em consoles com payload ps4debug ativo).
-//   Futuramente um seletor de arquivos pode ser implementado.
+// Torrent location:
+//   The app reads the first .torrent file found in /data/pkg/torrents/
+//   (a mounted directory on consoles with ps4debug payload active).
+//   A file picker may be implemented in the future.
 //
-// Diretório de download:
-//   /data/pkg/downloads/  — requer ps4debug ou goldhen para acesso de escrita.
+// Download directory:
+//   /data/pkg/downloads/  — requires ps4debug or GoldHEN for write access.
 // =============================================================================
 
-// Cabeçalhos PS4 via OpenOrbis
+// PS4 headers via OpenOrbis
 #include <orbis/libkernel.h>    // sceKernelUsleep, sceKernelSleep
 #include <orbis/UserService.h>
 
-// Nossa biblioteca
+// Our library
 #include "session.hpp"
 #include "ui/renderer.hpp"
 
@@ -32,20 +32,20 @@
 #include <string>
 
 // =============================================================================
-// Configurações de caminhos no PS4
+// Path configuration on the PS4
 // =============================================================================
 
 static constexpr const char* TORRENT_DIR  = "/data/pkg/torrents";
 static constexpr const char* DOWNLOAD_DIR = "/data/pkg/downloads";
 
 // =============================================================================
-// find_first_torrent — busca o primeiro .torrent no diretório
+// find_first_torrent — find the first .torrent file in a directory
 // =============================================================================
 
 static std::string find_first_torrent(const char* dir_path) {
     DIR* dir = opendir(dir_path);
     if (!dir) {
-        printf("[main] Não foi possível abrir: %s\n", dir_path);
+        printf("[main] Could not open: %s\n", dir_path);
         return {};
     }
 
@@ -54,7 +54,7 @@ static std::string find_first_torrent(const char* dir_path) {
 
     while ((entry = readdir(dir)) != nullptr) {
         std::string name = entry->d_name;
-        // Verifica extensão .torrent
+        // Check .torrent extension
         if (name.size() > 8 &&
             name.substr(name.size() - 8) == ".torrent")
         {
@@ -68,81 +68,81 @@ static std::string find_first_torrent(const char* dir_path) {
 }
 
 // =============================================================================
-// wait_for_cross_button — aguarda o botão X para confirmar
+// wait_for_cross_button — wait for the X button to confirm
 // =============================================================================
 
 static void wait_for_cross_button() {
-    // Aguarda 5 segundos ou até o botão X ser pressionado
-    // (em modo debug, qualquer tecla funciona)
+    // Wait 5 seconds or until the X button is pressed
+    // (in debug mode, any key works)
     for (int i = 0; i < 50; ++i) {
         sceKernelUsleep(100'000); // 100ms
-        // bt::ui::check_cancel_button() usa O (circle), aqui aguardamos
-        // apenas timeout para simplificar a tela final
+        // bt::ui::check_cancel_button() uses Circle (O), here we just
+        // use a timeout to simplify the final screen
     }
 }
 
 // =============================================================================
-// eboot_main — substitui main() no ABI do PS4
+// eboot_main — replaces main() in the PS4 ABI
 //
-// No OpenOrbis, o ponto de entrada é main() padrão, ligado ao musl libc.
-// O nome eboot_main é apenas um alias descritivo aqui.
+// In OpenOrbis, the entry point is standard main(), linked against musl libc.
+// The name eboot_main is just a descriptive alias here.
 // =============================================================================
 
 int main() {
     using Clock = std::chrono::steady_clock;
 
     // -------------------------------------------------------------------------
-    // 1. Inicializa serviços do sistema
+    // 1. Initialize system services
     // -------------------------------------------------------------------------
     bt::ui::init_system_services();
 
-    printf("[main] PS4 Torrent v0.1 iniciando...\n");
-    printf("[main] Buscando .torrent em: %s\n", TORRENT_DIR);
+    printf("[main] PS4 Torrent v0.1 starting...\n");
+    printf("[main] Looking for .torrent in: %s\n", TORRENT_DIR);
 
     // -------------------------------------------------------------------------
-    // 2. Localiza o arquivo .torrent
+    // 2. Locate the .torrent file
     // -------------------------------------------------------------------------
     std::string torrent_path = find_first_torrent(TORRENT_DIR);
     if (torrent_path.empty()) {
         bt::ui::render_error(
-            std::string("Nenhum arquivo .torrent encontrado em:\n  ") + TORRENT_DIR +
-            "\n\n  Coloque um arquivo .torrent neste diretório e relance o app."
+            std::string("No .torrent file found in:\n  ") + TORRENT_DIR +
+            "\n\n  Place a .torrent file in this directory and relaunch the app."
         );
         sceKernelSleep(10);
         return 1;
     }
 
-    printf("[main] Torrent encontrado: %s\n", torrent_path.c_str());
+    printf("[main] Torrent found: %s\n", torrent_path.c_str());
 
     // -------------------------------------------------------------------------
-    // 3. Cria a sessão de download
+    // 3. Create the download session
     // -------------------------------------------------------------------------
     std::unique_ptr<bt::Session> session;
     try {
         session = std::make_unique<bt::Session>(torrent_path, DOWNLOAD_DIR);
     } catch (const std::exception& e) {
         bt::ui::render_error(
-            std::string("Erro ao ler o torrent:\n  ") + e.what()
+            std::string("Error reading torrent:\n  ") + e.what()
         );
         sceKernelSleep(10);
         return 1;
     }
 
     const bt::Metainfo& meta = session->metainfo();
-    printf("[main] Torrent: %s  (%lld bytes, %zu pecas)\n",
+    printf("[main] Torrent: %s  (%lld bytes, %zu pieces)\n",
            meta.name.c_str(),
            static_cast<long long>(meta.total_length),
            meta.num_pieces());
 
     // -------------------------------------------------------------------------
-    // 4. Configura o callback de progresso
+    // 4. Configure the progress callback
     // -------------------------------------------------------------------------
     session->set_progress_callback([&meta](const bt::ProgressInfo& info) {
         bt::ui::render_progress(meta.name, meta.total_length, info);
     });
 
     // -------------------------------------------------------------------------
-    // 5. Inicia o download em thread separada para não bloquear o input
+    // 5. Start the download in a separate thread to keep input responsive
     // -------------------------------------------------------------------------
     auto start_time   = Clock::now();
     bool session_error = false;
@@ -158,30 +158,30 @@ int main() {
     });
 
     // -------------------------------------------------------------------------
-    // 6. Loop principal — verifica input do controle
+    // 6. Main loop — monitor controller input
     // -------------------------------------------------------------------------
     while (session->is_running() && !session->is_complete()) {
         sceKernelUsleep(100'000); // 100ms
 
-        // Botão O = cancelar download
+        // Circle button = cancel download
         if (bt::ui::check_cancel_button()) {
-            printf("[main] Cancelamento solicitado pelo usuario.\n");
+            printf("[main] Cancel requested by user.\n");
             session->stop();
             break;
         }
     }
 
-    // Aguarda a thread de download encerrar limpo
+    // Wait for the download thread to finish cleanly
     if (download_thread.joinable()) download_thread.join();
 
     auto end_time    = Clock::now();
     double elapsed_s = std::chrono::duration<double>(end_time - start_time).count();
 
     // -------------------------------------------------------------------------
-    // 7. Tela final
+    // 7. Final screen
     // -------------------------------------------------------------------------
     if (session_error) {
-        bt::ui::render_error(std::string("Erro durante o download:\n  ") + error_msg);
+        bt::ui::render_error(std::string("Download error:\n  ") + error_msg);
         sceKernelSleep(10);
         return 1;
     }
@@ -189,7 +189,7 @@ int main() {
     if (session->is_complete()) {
         bt::ui::render_complete(meta.name, meta.total_length, elapsed_s);
     } else {
-        bt::ui::render_error("Download cancelado pelo usuario.");
+        bt::ui::render_error("Download cancelled by user.");
     }
 
     wait_for_cross_button();

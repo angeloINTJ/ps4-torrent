@@ -1,32 +1,32 @@
 # =============================================================================
-# ps4-torrent — Makefile para OpenOrbis PS4 Toolchain
+# ps4-torrent — Makefile for the OpenOrbis PS4 Toolchain
 #
-# Pré-requisito: variável OO_PS4_TOOLCHAIN apontando para o toolchain instalado.
-# Exemplo: export OO_PS4_TOOLCHAIN=/opt/openorbis
+# Prerequisite: OO_PS4_TOOLCHAIN variable pointing to the installed toolchain.
+# Example: export OO_PS4_TOOLCHAIN=/opt/openorbis
 #
-# Uso:
-#   make          — compila e gera o .pkg
-#   make clean    — limpa artefatos de build
+# Usage:
+#   make          — build and generate the .pkg
+#   make clean    — remove build artifacts
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# Verificação do toolchain
+# Toolchain check
 # ---------------------------------------------------------------------------
 ifndef OO_PS4_TOOLCHAIN
-    $(error OO_PS4_TOOLCHAIN não definido. Instale o OpenOrbis e exporte a variável.)
+    $(error OO_PS4_TOOLCHAIN not set. Install OpenOrbis and export the variable.)
 endif
 
 OOSDK := $(OO_PS4_TOOLCHAIN)
 
 # ---------------------------------------------------------------------------
-# Metadados do aplicativo
+# Application metadata
 # ---------------------------------------------------------------------------
 TARGET    := ps4-torrent
 TITLE     := PS4 Torrent
 TITLE_ID  := BTRC00001
 
 # ---------------------------------------------------------------------------
-# Diretórios
+# Directories
 # ---------------------------------------------------------------------------
 PROJDIR  := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 INTDIR   := $(PROJDIR)/build
@@ -34,7 +34,7 @@ OUTDIR   := $(PROJDIR)/output
 PKG_ROOT := $(INTDIR)/pkg_root
 
 # ---------------------------------------------------------------------------
-# Toolchain — LLVM/Clang cross-compiler para x86_64-freebsd (PS4)
+# Toolchain — LLVM/Clang cross-compiler for x86_64-freebsd (PS4)
 # ---------------------------------------------------------------------------
 CC           := clang
 CXX          := clang++
@@ -43,7 +43,7 @@ CREATE_FSELF := $(OOSDK)/bin/linux/create-fself
 PKG_TOOL     := $(OOSDK)/bin/linux/PkgTool.Core
 
 # ---------------------------------------------------------------------------
-# Flags de compilação
+# Compilation flags
 # ---------------------------------------------------------------------------
 TARGET_TRIPLE := x86_64-pc-freebsd12-elf
 
@@ -63,7 +63,7 @@ CFLAGS := \
 
 CXXFLAGS := $(CFLAGS) -std=c++17
 
-# Bibliotecas PS4 necessárias
+# Required PS4 libraries
 LIBS := \
     SceLibcInternal \
     SceUserService  \
@@ -93,7 +93,7 @@ LFLAGS := \
     --undefined=__inet_aton
 
 # ---------------------------------------------------------------------------
-# Fontes
+# Sources
 # ---------------------------------------------------------------------------
 SOURCES_CPP := $(shell find src -name '*.cpp')
 SOURCES_C   := $(shell find src -name '*.c')
@@ -103,9 +103,9 @@ OBJECTS := \
     $(patsubst src/%.c,   $(INTDIR)/%.o, $(SOURCES_C))
 
 # ---------------------------------------------------------------------------
-# Regras de build
+# Build rules
 # ---------------------------------------------------------------------------
-# Gerar PKG
+# Generate PKG
 PKG_OUT := $(OUTDIR)/UP0000-$(TITLE_ID)_00-0000000000000000.pkg
 GP4 := $(INTDIR)/project.gp4
 
@@ -113,33 +113,33 @@ GP4 := $(INTDIR)/project.gp4
 
 all: $(PKG_OUT)
 
-# Compilar .cpp
+# Compile .cpp
 $(INTDIR)/%.o: src/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -o $@ $<
 
-# Compilar .c
+# Compile .c
 $(INTDIR)/%.o: src/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -o $@ $<
 
-# Linkar ELF
+# Link ELF
 $(INTDIR)/$(TARGET).elf: $(OBJECTS)
 	@mkdir -p $(INTDIR)
 	$(LD) $(LFLAGS) $(OOSDK)/lib/crt1.o $(OOSDK)/lib/crti.o $^ $(OOSDK)/lib/crtn.o -o $@
 
-# Gerar fake SELF (eboot.bin)
+# Generate fake SELF (eboot.bin)
 $(PKG_ROOT)/eboot.bin: $(INTDIR)/$(TARGET).elf
 	@mkdir -p $(PKG_ROOT)/sce_sys
 	$(CREATE_FSELF) -in $< -out $@ --eboot --paid 0x3800000000000011
 
-# Copiar assets
+# Copy assets
 $(PKG_ROOT)/sce_sys/param.sfo: assets/param.sfo
 	@mkdir -p $(PKG_ROOT)/sce_sys
 	@cp $< $@
 	@cp assets/icon0.png $(PKG_ROOT)/sce_sys/icon0.png 2>/dev/null || true
 
-# Gerar GP4
+# Generate GP4
 $(GP4): $(PKG_ROOT)/eboot.bin $(PKG_ROOT)/sce_sys/param.sfo
 	@echo '<?xml version="1.0"?>' > $@
 	@echo '<psproject fmt="gp4" version="1000">' >> $@
@@ -177,9 +177,9 @@ $(PKG_OUT): $(GP4)
 	DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
 	cd $(PROJDIR) && $(PKG_TOOL) pkg_build $(GP4) $(OUTDIR)
 	@echo ""
-	@echo "  PKG gerado: $(PKG_OUT)"
-	@echo "  Copie este arquivo para o PS4 e instale via Remote PKG Installer."
+	@echo "  PKG generated: $(PKG_OUT)"
+	@echo "  Copy this file to the PS4 and install via Remote PKG Installer."
 
 clean:
 	@rm -rf $(INTDIR) $(OUTDIR)
-	@echo "  Limpo."
+	@echo "  Clean."

@@ -1,5 +1,5 @@
 // =============================================================================
-// session.cpp — Implementação da sessão BitTorrent
+// session.cpp — Download session implementation
 // =============================================================================
 
 #include "session.hpp"
@@ -18,7 +18,7 @@
 namespace bt {
 
 // =============================================================================
-// Construtor — carrega o .torrent e inicializa os módulos
+// Constructor — load .torrent and initialize modules
 // =============================================================================
 
 Session::Session(const std::string& torrent_path, const std::string& save_dir)
@@ -37,15 +37,15 @@ Session::Session(const std::string& torrent_path, const std::string& save_dir)
 std::string Session::read_file(const std::string& path) {
     int fd = ::open(path.c_str(), O_RDONLY);
     if (fd < 0)
-        throw std::runtime_error("session: não foi possível abrir: " + path);
+        throw std::runtime_error("session: could not open: " + path);
 
-    // Obtém tamanho
+    // Get file size
     off_t size = ::lseek(fd, 0, SEEK_END);
     ::lseek(fd, 0, SEEK_SET);
 
     if (size <= 0) {
         ::close(fd);
-        throw std::runtime_error("session: arquivo vazio ou inválido: " + path);
+        throw std::runtime_error("session: empty or invalid file: " + path);
     }
 
     std::string data(static_cast<size_t>(size), '\0');
@@ -53,18 +53,18 @@ std::string Session::read_file(const std::string& path) {
     ::close(fd);
 
     if (got != size)
-        throw std::runtime_error("session: leitura incompleta de: " + path);
+        throw std::runtime_error("session: incomplete read of: " + path);
 
     return data;
 }
 
 std::string Session::generate_peer_id() {
-    // Formato: "-PS0001-" + 12 dígitos pseudo-aleatórios
-    // PS = PS4 Torrent, 0001 = versão
+    // Format: "-PS0001-" + 12 pseudo-random digits
+    // PS = PS4 Torrent, 0001 = version
     std::string id = "-PS0001-";
     id.reserve(20);
 
-    // Semente baseada em tempo
+    // Time-based seed
     uint32_t seed = static_cast<uint32_t>(std::time(nullptr));
     for (int i = 0; i < 12; ++i) {
         seed ^= seed << 13;
@@ -93,13 +93,13 @@ void Session::stop() noexcept {
 }
 
 // =============================================================================
-// peer_worker — loop de download de um único peer
+// peer_worker — download loop for a single peer
 // =============================================================================
 
 void Session::peer_worker(PeerAddr addr) {
     peers_active_.fetch_add(1, std::memory_order_relaxed);
 
-    // Escopo de limpeza automática ao sair (RAII-like sem exceptions aqui)
+    // Auto-cleanup scope guard (RAII-style, no exceptions needed)
     struct Guard {
         std::atomic<int>& counter;
         ~Guard() { counter.fetch_sub(1, std::memory_order_relaxed); }
@@ -111,16 +111,16 @@ void Session::peer_worker(PeerAddr addr) {
 
         if (!conn.handshake(meta_.info_hash, peer_id_)) return;
 
-        // Envia nosso bitfield ao peer
+        // Send our bitfield to the peer
         conn.send_bitfield(pm_->our_bitfield());
 
-        // Informamos que estamos interessados
+        // Signal that we are interested
         conn.send_interested();
 
-        // Bitfield do peer — acumulado à medida que chegam mensagens Have/Bitfield
+        // Peer bitfield — built up as Have/Bitfield messages arrive
         std::vector<uint8_t> peer_bf;
 
-        // Número de requests em voo (pipeline simples)
+        // Number of in-flight requests (simple pipeline)
         static constexpr int PIPELINE_DEPTH = 5;
         int requests_in_flight = 0;
 
@@ -133,11 +133,11 @@ void Session::peer_worker(PeerAddr addr) {
             }
         };
 
-        // Loop principal de mensagens
+        // Main message loop
         while (!stop_requested_.load() && !pm_->is_complete()) {
             auto msg_opt = conn.read_message();
             if (!msg_opt) {
-                // Keep-alive — responde de volta
+                // Keep-alive — respond in kind
                 conn.send_keepalive();
                 continue;
             }
@@ -152,7 +152,7 @@ void Session::peer_worker(PeerAddr addr) {
                 break;
 
             case MsgType::Have: {
-                // Expande o bitfield se necessário
+                // Expand bitfield if necessary
                 size_t byte_needed = (msg.piece_index / 8) + 1;
                 if (peer_bf.size() < byte_needed)
                     peer_bf.resize(byte_needed, 0);
@@ -163,45 +163,45 @@ void Session::peer_worker(PeerAddr addr) {
             }
 
             case MsgType::Unchoke:
-                // Peer nos desbloqueou — podemos pedir blocos agora
+                // Peer unchoked us — we can request blocks now
                 maybe_request();
                 break;
 
             case MsgType::Choke:
-                // Peer nos bloqueou — cancela requests em voo (não precisa
-                // enviar Cancel pois o peer ignorará mesmo)
+                // Peer choked us — in-flight requests are cancelled
+                // (no need to send Cancel, the peer will ignore them anyway)
                 requests_in_flight = 0;
                 break;
 
             case MsgType::Piece:
-                // Recebe um bloco de dados
+                // Received a data block
                 if (requests_in_flight > 0) --requests_in_flight;
                 pm_->receive_block(msg.piece_index, msg.begin, msg.block);
 
-                // Se a peça completou, anuncia Have a este peer
-                // (num sistema multi-peer completo, anunciaria a todos)
+                // If the piece completed, announce Have to this peer
+                // (in a full multi-peer system, this would be broadcast)
                 if (pm_->pieces_done() > 0) {
                     conn.send_have(msg.piece_index);
                 }
 
-                // Solicita mais blocos para manter o pipeline cheio
+                // Request more blocks to keep the pipeline full
                 maybe_request();
                 break;
 
             default:
-                // Outras mensagens ignoradas por ora
+                // Other messages ignored for now
                 break;
             }
         }
 
     } catch (const std::exception& /* e */) {
-        // Erros de conexão são esperados — peer pode cair a qualquer momento
-        // Em modo debug: logar e.what() para o console PS4
+        // Connection errors are expected — peers can drop at any time
+        // In debug mode: log e.what() to the PS4 console
     }
 }
 
 // =============================================================================
-// tracker_thread — anuncia periodicamente ao tracker
+// tracker_thread — periodic announce to the tracker
 // =============================================================================
 
 void Session::tracker_thread() {
@@ -210,7 +210,7 @@ void Session::tracker_thread() {
             std::string event = "started";
             {
                 std::lock_guard<std::mutex> lk(tracker_mutex_);
-                // Nas chamadas seguintes, sem event especial
+                // On subsequent calls, no special event
                 if (last_tracker_resp_.interval > 0) event = "";
             }
 
@@ -227,19 +227,19 @@ void Session::tracker_thread() {
                 last_tracker_resp_ = resp;
             }
 
-            // Aguarda o intervalo pedido pelo tracker (ou 30s mínimo)
+            // Wait for the interval requested by the tracker (or 30s minimum)
             int wait_sec = std::max(30, resp.interval);
             for (int i = 0; i < wait_sec && !stop_requested_.load(); ++i) {
                 std::this_thread::sleep_for(std::chrono::seconds(1));
             }
 
         } catch (...) {
-            // Falha de tracker não é fatal — espera e tenta de novo
+            // Tracker failure is not fatal — wait and retry
             std::this_thread::sleep_for(std::chrono::seconds(30));
         }
     }
 
-    // Announce final de "stopped" ou "completed"
+    // Final "stopped" or "completed" announce
     try {
         std::string final_event = pm_->is_complete() ? "completed" : "stopped";
         tracker_announce(
@@ -252,7 +252,7 @@ void Session::tracker_thread() {
 }
 
 // =============================================================================
-// progress_thread — dispara callback a cada 500ms
+// progress_thread — fire callback every 500ms
 // =============================================================================
 
 void Session::progress_thread() {
@@ -291,7 +291,7 @@ void Session::progress_thread() {
         progress_cb_(info);
     }
 
-    // Callback final (100%)
+    // Final callback (100%)
     if (progress_cb_ && pm_->is_complete()) {
         ProgressInfo info{};
         info.pct        = 100.0f;
@@ -302,7 +302,7 @@ void Session::progress_thread() {
 }
 
 // =============================================================================
-// run_peer_pool — gerencia o pool de peer workers
+// run_peer_pool — manage the pool of peer workers
 // =============================================================================
 
 void Session::run_peer_pool(const std::vector<PeerAddr>& peers) {
@@ -312,13 +312,13 @@ void Session::run_peer_pool(const std::vector<PeerAddr>& peers) {
     size_t peer_idx = 0;
 
     while (!stop_requested_.load() && !pm_->is_complete()) {
-        // Lança workers até o limite
+        // Spawn workers up to the limit
         while (peers_active_.load() < MAX_PEERS && peer_idx < peers.size()) {
             PeerAddr addr = peers[peer_idx++];
             workers.emplace_back([this, addr]() { peer_worker(addr); });
         }
 
-        // Se esgotamos os peers do tracker, aguarda novas respostas
+        // If we've exhausted tracked peers, wait for new announce responses
         if (peer_idx >= peers.size() && peers_active_.load() == 0) {
             std::this_thread::sleep_for(std::chrono::seconds(5));
         }
@@ -326,42 +326,42 @@ void Session::run_peer_pool(const std::vector<PeerAddr>& peers) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 
-    // Aguarda todos os workers terminarem
+    // Wait for all workers to finish
     for (auto& t : workers) {
         if (t.joinable()) t.join();
     }
 }
 
 // =============================================================================
-// start — ponto de entrada público (bloqueante)
+// start — public entry point (blocking)
 // =============================================================================
 
 void Session::start() {
     running_.store(true);
     stop_requested_.store(false);
 
-    // Announce inicial ao tracker
+    // Initial announce to the tracker
     TrackerResponse resp = tracker_announce(
         meta_, peer_id_, LOCAL_PORT,
         0, 0, meta_.total_length, "started"
     );
 
     if (!resp.ok())
-        throw std::runtime_error("session: tracker recusou: " + resp.failure);
+        throw std::runtime_error("session: tracker rejected: " + resp.failure);
 
     {
         std::lock_guard<std::mutex> lk(tracker_mutex_);
         last_tracker_resp_ = resp;
     }
 
-    // Inicia threads auxiliares
+    // Start auxiliary threads
     std::thread t_tracker([this]() { tracker_thread();  });
     std::thread t_progress([this]() { progress_thread(); });
 
-    // Roda o pool de peers (bloqueante)
+    // Run the peer pool (blocking)
     run_peer_pool(resp.peers);
 
-    // Sinaliza parada para threads auxiliares
+    // Signal auxiliary threads to stop
     stop_requested_.store(true);
 
     if (t_tracker.joinable())  t_tracker.join();

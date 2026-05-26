@@ -1,18 +1,19 @@
-#pragma once
 // =============================================================================
-// piece_manager.hpp — Gerenciador de peças do torrent
+// piece_manager.hpp — Torrent piece manager
 //
-// Responsabilidades:
-//   - Rastrear quais peças foram baixadas e verificadas
-//   - Verificar integridade de cada peça via SHA1
-//   - Montar o bitfield para anunciar aos peers
-//   - Selecionar a próxima peça/bloco a solicitar (estratégia rarest-first simples)
-//   - Gravar blocos recebidos no arquivo de destino
+// Responsibilities:
+//   - Track which pieces have been downloaded and verified
+//   - Verify the integrity of each piece via SHA1
+//   - Build the bitfield to announce to peers
+//   - Select the next piece/block to request (simple rarest-first strategy)
+//   - Write received blocks to the destination file
 //
 // Thread-safety:
-//   Todos os métodos públicos são protegidos por um mutex interno.
-//   É seguro chamar de múltiplas threads de peer simultaneamente.
+//   All public methods are protected by an internal mutex.
+//   Safe to call from multiple peer threads simultaneously.
 // =============================================================================
+
+#pragma once
 
 #include "metainfo.hpp"
 #include "sha1.hpp"
@@ -27,26 +28,26 @@
 namespace bt {
 
 // =============================================================================
-// Estado de uma peça individual
+// Individual piece state
 // =============================================================================
 
 enum class PieceStatus : uint8_t {
-    Missing    = 0,   // Não temos e não estamos baixando
-    Pending    = 1,   // Blocos sendo baixados
-    Complete   = 2,   // Todos blocos recebidos e SHA1 verificado
-    HashFail   = 3,   // Recebida mas SHA1 errado — será redownloadada
+    Missing    = 0,   // Not owned and not being downloaded
+    Pending    = 1,   // Blocks currently being downloaded
+    Complete   = 2,   // All blocks received and SHA1 verified
+    HashFail   = 3,   // Received but SHA1 mismatch — will be re-downloaded
 };
 
 /**
- * Representa uma peça em processo de download.
- * Cada peça é dividida em blocos de 16 KiB (BLOCK_SIZE).
+ * Represents a piece being downloaded.
+ * Each piece is divided into 16 KiB blocks (BLOCK_SIZE).
  */
 struct Piece {
     uint32_t              index;
     PieceStatus           status;
-    std::vector<uint8_t>  data;              // Buffer acumulando os blocos
-    std::vector<bool>     blocks_received;   // Bitset: bloco i chegou?
-    uint32_t              blocks_done;       // Contagem para evitar loop de verificação
+    std::vector<uint8_t>  data;              // Buffer accumulating blocks
+    std::vector<bool>     blocks_received;   // Bitset: has block i arrived?
+    uint32_t              blocks_done;       // Counter to avoid verifying every loop
 
     explicit Piece(uint32_t idx, int64_t piece_len, size_t num_blocks)
         : index(idx)
@@ -58,13 +59,13 @@ struct Piece {
 };
 
 // =============================================================================
-// Solicitação de bloco — unidade mínima de download
+// Block request — smallest download unit
 // =============================================================================
 
 struct BlockRequest {
     uint32_t piece_index;
-    uint32_t begin;    // Offset em bytes dentro da peça
-    uint32_t length;   // Tamanho do bloco (≤ 16 KiB)
+    uint32_t begin;    // Byte offset within the piece
+    uint32_t length;   // Block size (≤ 16 KiB)
 };
 
 // =============================================================================
@@ -74,44 +75,44 @@ struct BlockRequest {
 class PieceManager {
 public:
     /**
-     * @param meta      Metainfo do torrent
-     * @param save_dir  Diretório onde os arquivos serão gravados
-     *                  (ex: "/data/pkg" no PS4 jailbroken)
+     * @param meta      Torrent metainfo
+     * @param save_dir  Directory where files will be written
+     *                  (e.g. "/data/pkg" on a jailbroken PS4)
      */
     PieceManager(const Metainfo& meta, const std::string& save_dir);
 
     // -------------------------------------------------------------------------
-    // Interface principal (thread-safe)
+    // Main interface (thread-safe)
     // -------------------------------------------------------------------------
 
     /**
-     * Recebe um bloco de dados de um peer.
-     * Se a peça completar, verifica o SHA1 e grava no disco.
+     * Receive a data block from a peer.
+     * If the piece completes, verify SHA1 and flush to disk.
      *
-     * @return true   — peça completa e verificada com sucesso
-     * @return false  — bloco armazenado mas peça ainda incompleta, ou SHA1 falhou
+     * @return true   — piece complete and verified successfully
+     * @return false  — block stored but piece still incomplete, or SHA1 failed
      */
     bool receive_block(uint32_t piece_index, uint32_t begin,
                        const std::vector<uint8_t>& data);
 
     /**
-     * Seleciona o próximo bloco a solicitar para um peer específico.
-     * Usa estratégia simples: primeira peça Missing, primeiro bloco faltando.
+     * Select the next block to request for a specific peer.
+     * Uses a simple strategy: first Missing piece, first missing block.
      *
-     * @param peer_bitfield   Bitfield do peer (quais peças ele tem)
-     * @return BlockRequest   — bloco a solicitar
-     * @return std::nullopt   — nada a solicitar (download completo ou peer não tem nada útil)
+     * @param peer_bitfield   The peer's bitfield (which pieces it has)
+     * @return BlockRequest   — block to request
+     * @return std::nullopt   — nothing to request (download complete or peer has nothing useful)
      */
     std::optional<BlockRequest> next_request(const std::vector<uint8_t>& peer_bitfield) const;
 
     /**
-     * Retorna nosso bitfield atual (para enviar ao peer no handshake).
-     * 1 bit por peça, ordem MSB-first.
+     * Return our current bitfield (to send to the peer during handshake).
+     * 1 bit per piece, MSB-first order.
      */
     std::vector<uint8_t> our_bitfield() const;
 
     // -------------------------------------------------------------------------
-    // Progresso
+    // Progress
     // -------------------------------------------------------------------------
 
     size_t  pieces_total()    const noexcept { return pieces_.size(); }
@@ -121,7 +122,7 @@ public:
     int64_t bytes_downloaded() const noexcept;
     int64_t bytes_total()      const noexcept { return meta_.total_length; }
 
-    /** Percentual de 0.0 a 100.0 */
+    /** Percentage from 0.0 to 100.0 */
     float   progress_pct()     const noexcept;
 
 private:
@@ -130,32 +131,32 @@ private:
     std::vector<Piece>        pieces_;
     std::atomic<size_t>       done_count_{0};
 
-    mutable std::mutex        mutex_;   // Protege pieces_
+    mutable std::mutex        mutex_;   // Protects pieces_
 
     // -------------------------------------------------------------------------
-    // Helpers internos (chamados com mutex_ travado)
+    // Internal helpers (called with mutex_ locked)
     // -------------------------------------------------------------------------
 
     /**
-     * Verifica SHA1 de uma peça completa e, se OK, grava no disco.
-     * Se SHA1 falhar, marca a peça como HashFail para redownload.
+     * Verify SHA1 of a complete piece and, if OK, flush to disk.
+     * On SHA1 failure, marks the piece as HashFail for re-download.
      */
     bool verify_and_flush(Piece& p);
 
     /**
-     * Escreve os bytes de uma peça nos arquivos corretos.
-     * Lida com peças que cruzam fronteiras de arquivo (modo multi-file).
+     * Write the bytes of a piece to the correct files.
+     * Handles pieces that cross file boundaries (multi-file mode).
      */
     void write_piece(uint32_t piece_index, const std::vector<uint8_t>& data);
 
     /**
-     * Cria os diretórios e arquivos necessários com tamanho pré-alocado.
-     * Chamado no construtor.
+     * Create the necessary directories and pre-allocate files.
+     * Called from the constructor.
      */
     void allocate_files();
 
     /**
-     * Verifica se o peer tem a peça `index` baseado no bitfield dele.
+     * Check whether the peer has the piece at `index` based on its bitfield.
      */
     static bool peer_has_piece(const std::vector<uint8_t>& bitfield, uint32_t index) noexcept;
 };

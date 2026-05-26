@@ -1,17 +1,17 @@
 // =============================================================================
-// bencode.cpp — Implementação do parser e encoder bencode
+// bencode.cpp — Bencode parser and encoder implementation
 // =============================================================================
 
 #include "bencode.hpp"
 
-#include <charconv>   // std::from_chars — sem alocação, seguro em PS4/musl
+#include <charconv>   // std::from_chars — zero-allocation, safe on PS4/musl
 #include <cstring>
 #include <stdexcept>
 
 namespace bt {
 
 // =============================================================================
-// Parser interno — estado de parsing encapsulado em struct
+// Internal parser — parsing state encapsulated in a struct
 // =============================================================================
 
 namespace {
@@ -25,14 +25,14 @@ struct Parser {
         : begin(sv.data()), end(sv.data() + sv.size()), cur(sv.data()) {}
 
     // -------------------------------------------------------------------------
-    // Primitivas de navegação
+    // Navigation primitives
     // -------------------------------------------------------------------------
 
     bool at_end() const noexcept { return cur >= end; }
 
     char peek() const {
         if (at_end())
-            throw std::runtime_error("bencode: fim inesperado da entrada");
+            throw std::runtime_error("bencode: unexpected end of input");
         return *cur;
     }
 
@@ -46,12 +46,12 @@ struct Parser {
         char got = consume();
         if (got != c) {
             throw std::runtime_error(
-                std::string("bencode: esperado '") + c + "', obtido '" + got + "'");
+                std::string("bencode: expected '") + c + "', got '" + got + "'");
         }
     }
 
     // -------------------------------------------------------------------------
-    // Parsers por tipo
+    // Per-type parsers
     // -------------------------------------------------------------------------
 
     BValue parse();
@@ -67,13 +67,13 @@ struct Parser {
         BInt result = 0;
         auto [ptr, ec] = std::from_chars(num_start, num_end, result);
         if (ec != std::errc{} || ptr != num_end)
-            throw std::runtime_error("bencode: inteiro inválido");
+            throw std::runtime_error("bencode: invalid integer");
 
         return BValue(result);
     }
 
     BString parse_string() {
-        // Lê o comprimento decimal
+        // Read the decimal length prefix
         const char* len_start = cur;
         while (!at_end() && *cur != ':') ++cur;
         const char* len_end = cur;
@@ -82,10 +82,10 @@ struct Parser {
         size_t len = 0;
         auto [ptr, ec] = std::from_chars(len_start, len_end, len);
         if (ec != std::errc{})
-            throw std::runtime_error("bencode: comprimento de string inválido");
+            throw std::runtime_error("bencode: invalid string length");
 
         if (static_cast<size_t>(end - cur) < len)
-            throw std::runtime_error("bencode: string excede o buffer");
+            throw std::runtime_error("bencode: string exceeds buffer");
 
         BString s(cur, len);
         cur += len;
@@ -106,7 +106,7 @@ struct Parser {
         expect('d');
         BDict result;
         while (peek() != 'e') {
-            // Keys em bencode são sempre strings
+            // Keys are always strings in bencode
             BString key = parse_string();
             BValue  val = parse();
             result.emplace(std::move(key), std::move(val));
@@ -125,14 +125,14 @@ BValue Parser::parse() {
     if (c >= '0' && c <= '9')        return BValue(parse_string());
 
     throw std::runtime_error(
-        std::string("bencode: caractere inesperado '") + c + "' na posição " +
+        std::string("bencode: unexpected character '") + c + "' at position " +
         std::to_string(cur - begin));
 }
 
-} // namespace anônimo
+} // anonymous namespace
 
 // =============================================================================
-// API pública
+// Public API
 // =============================================================================
 
 BValue decode(std::string_view data) {
@@ -166,7 +166,7 @@ void encode_into(const BValue& val, std::string& out) {
 
     if (val.is_dict()) {
         out += 'd';
-        // std::map itera em ordem lexicográfica — correto para bencode
+        // std::map iterates in lexicographic order — correct for bencode
         for (const auto& [k, v] : val.as_dict()) {
             out += std::to_string(k.size());
             out += ':';
@@ -177,7 +177,7 @@ void encode_into(const BValue& val, std::string& out) {
         return;
     }
 
-    throw std::runtime_error("bencode: tipo de valor desconhecido");
+    throw std::runtime_error("bencode: unknown value type");
 }
 
 std::string encode(const BValue& val) {

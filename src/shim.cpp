@@ -1,14 +1,18 @@
-// shim.cpp — Resolve hidden symbols que não casam entre musl libc.a e libSceLibcInternal.so
-// Este arquivo fornece wrappers para símbolos internos da musl que têm visibilidade
-// hidden na libc.a mas são implementados em shared objects do SDK do PS4.
+// =============================================================================
+// shim.cpp — Resolve hidden symbols that don't match between musl libc.a and
+//           libSceLibcInternal.so on the PS4.
+//
+// This file provides wrappers for internal musl symbols that have hidden
+// visibility in libc.a but are implemented in PS4 SDK shared objects.
+// =============================================================================
 
 #include <arpa/inet.h>
 
 extern "C" {
 
-// musl libc interna — lookup_ipliteral.c chama __inet_aton como hidden symbol.
-// A implementação real está em libSceLibcInternal.so, inacessível via hidden ref.
-// Fornecemos um wrapper que chama o símbolo público inet_aton.
+// musl libc internal — lookup_ipliteral.c calls __inet_aton as a hidden symbol.
+// The actual implementation is in libSceLibcInternal.so, inaccessible via a
+// hidden reference. We provide a wrapper that calls the public inet_aton symbol.
 int __inet_aton(const char* cp, struct in_addr* inp) {
     return inet_aton(cp, inp);
 }
