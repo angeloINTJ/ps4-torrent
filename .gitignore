@@ -1,0 +1,17 @@
+# Build artifacts
+build/
+output/
+
+# Editor/IDE
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies
+openssl-*/
