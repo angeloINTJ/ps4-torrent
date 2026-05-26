@@ -1,6 +1,11 @@
 # PS4 Torrent — Homebrew BitTorrent Client para PS4
 
-Cliente BitTorrent nativo para PS4 jailbroken, desenvolvido com o
+**Criado por [Ângelo Moisés Alves](https://github.com/angeloINTJ)**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![GitHub repo](https://img.shields.io/badge/repo-angeloINTJ%2Fps4--torrent-green.svg)](https://github.com/angeloINTJ/ps4-torrent)
+
+Cliente BitTorrent **open source** nativo para PS4 jailbroken, desenvolvido com o
 [OpenOrbis PS4 Toolchain](https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain).
 Implementa o protocolo BitTorrent (BEP 3) do zero em C++17, sem dependências externas além do musl libc.
 
@@ -204,12 +209,24 @@ BEP 3  — Protocolo base        ✓ Completo
 
 ## Contribuindo
 
-Pull requests bem-vindos. Prioridade atual:
+Pull requests são bem-vindos! O projeto é open source (MIT) — fique à vontade
+para contribuir, abrir issues ou fazer forks. Prioridade atual:
 
 1. **SDL2 UI** — renderização gráfica no framebuffer do PS4
 2. **UDP Tracker** (BEP 15)
 3. **DHT** (BEP 5) — download sem tracker central
 4. **Seletor de .torrent** via controle
+
+---
+
+## Licença
+
+Este projeto é **open source** sob a licença [MIT](LICENSE).
+
+Copyright (c) 2025 **Ângelo Moisés Alves**
+
+Você é livre para usar, modificar e distribuir este software, desde que mantenha
+os créditos ao autor original.
 
 ---
 
