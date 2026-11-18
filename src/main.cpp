@@ -1,9 +1,9 @@
 // =============================================================================
-// main.cpp — PS4 Torrent homebrew entry point (FW <= 11.02+)
+// main.cpp — PS4 Torrent homebrew entry point (FW <= 14.02+)
 //
 // Flow:
 //   1. Initialize system services (VideoOut framebuffer, SystemService, UserService, Pad)
-//   2. Ensure /data/pkg/torrents and /data/pkg/downloads directories exist
+//   2. Ensure storage directories exist and pick a writable download directory
 //   3. Locate the first .torrent file in /data/pkg/torrents or USB (/mnt/usb0, /mnt/usb1)
 //   4. Start the download Session with a progress callback
 //   5. Main loop monitors controller input
@@ -22,7 +22,9 @@
 #include <cstdio>
 #include <cstring>
 #include <dirent.h>
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <string>
 #include <vector>
 
@@ -37,12 +39,19 @@ static constexpr const char* TORRENT_SEARCH_DIRS[] = {
     "/mnt/usb1/torrents",
     "/mnt/usb1",
     "/data/torrents",
+    "/user/data/torrents",
 };
 
-static constexpr const char* DEFAULT_DOWNLOAD_DIR = "/data/pkg/downloads";
+static constexpr const char* DOWNLOAD_CANDIDATE_DIRS[] = {
+    "/data/pkg/downloads",
+    "/data/downloads",
+    "/mnt/usb0/downloads",
+    "/mnt/usb1/downloads",
+    "/user/data/downloads",
+};
 
 // =============================================================================
-// ensure_directories — create default directories on the PS4 HDD
+// ensure_directories & select_download_dir
 // =============================================================================
 
 static void ensure_directories() {
@@ -51,6 +60,28 @@ static void ensure_directories() {
     ::mkdir("/data/pkg/torrents", 0777);
     ::mkdir("/data/pkg/downloads", 0777);
     ::mkdir("/data/torrents", 0777);
+    ::mkdir("/data/downloads", 0777);
+    ::mkdir("/user/data/torrents", 0777);
+    ::mkdir("/user/data/downloads", 0777);
+}
+
+static bool is_dir_writable(const char* dir_path) {
+    ::mkdir(dir_path, 0777);
+    std::string probe = std::string(dir_path) + "/.ps4_torrent_write_test";
+    int fd = ::open(probe.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) return false;
+    ::close(fd);
+    ::unlink(probe.c_str());
+    return true;
+}
+
+static std::string select_download_dir() {
+    for (const char* candidate : DOWNLOAD_CANDIDATE_DIRS) {
+        if (is_dir_writable(candidate)) {
+            return candidate;
+        }
+    }
+    return "/data/pkg/downloads";
 }
 
 // =============================================================================
@@ -100,7 +131,7 @@ static void wait_for_exit_button() {
 }
 
 // =============================================================================
-// main — PS4 eboot entry point
+// main — PS4 eboot / ELF entry point
 // =============================================================================
 
 int main() {
@@ -111,8 +142,9 @@ int main() {
     // -------------------------------------------------------------------------
     bt::ui::init_system_services();
     ensure_directories();
+    std::string download_dir = select_download_dir();
 
-    printf("[main] PS4 Torrent v0.2 starting...\n");
+    printf("[main] PS4 Torrent v0.2 starting (download_dir=%s)...\n", download_dir.c_str());
 
     // -------------------------------------------------------------------------
     // 2. Locate the .torrent file
@@ -141,7 +173,7 @@ int main() {
 
     std::unique_ptr<bt::Session> session;
     try {
-        session = std::make_unique<bt::Session>(torrent_path, DEFAULT_DOWNLOAD_DIR);
+        session = std::make_unique<bt::Session>(torrent_path, download_dir);
     } catch (const std::exception& e) {
         bt::ui::render_error(
             std::string("Error reading torrent:\n  ") + e.what()
@@ -160,7 +192,8 @@ int main() {
     bt::ui::notify("Starting: " + meta.name);
     bt::ui::render_status(
         "Connecting to tracker...",
-        "Torrent: " + meta.name + " (" + bt::ui::format_bytes(meta.total_length) + ")"
+        "Torrent: " + meta.name + " (" + bt::ui::format_bytes(meta.total_length) + ")\n"
+        "Saving to: " + download_dir
     );
 
     // -------------------------------------------------------------------------
@@ -223,7 +256,7 @@ int main() {
     }
 
     if (session->is_complete()) {
-        bt::ui::render_complete(meta.name, meta.total_length, elapsed_s);
+        bt::ui::render_complete(meta.name, meta.total_length, elapsed_s, download_dir);
     } else {
         bt::ui::render_error("Download cancelled by user.");
     }

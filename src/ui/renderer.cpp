@@ -247,7 +247,7 @@ void fb_draw_base_card(uint32_t* fb, uint32_t accent_color) {
     fb_fill_rect(fb, 160, 120, FB_WIDTH - 320, FB_HEIGHT - 240, COL_CARD);
     // Top accent bar
     fb_fill_rect(fb, 160, 120, FB_WIDTH - 320, 84, accent_color);
-    fb_draw_text(fb, 200, 148, "PS4 TORRENT v0.2  (FW <= 11.02)", COL_TEXT, 3);
+    fb_draw_text(fb, 200, 148, "PS4 TORRENT v0.2  (FW <= 14.02)", COL_TEXT, 3);
 }
 
 bool init_video_out() {
@@ -579,7 +579,12 @@ void render_error(const std::string& message) {
 // render_complete
 // =============================================================================
 
-void render_complete(const std::string& torrent_name, int64_t total_bytes, double elapsed_sec) {
+void render_complete(
+    const std::string& torrent_name,
+    int64_t            total_bytes,
+    double             elapsed_sec,
+    const std::string& save_dir)
+{
     std::lock_guard<std::mutex> lk(g_render_mutex);
 
     double avg_speed = (elapsed_sec > 0) ? (total_bytes / elapsed_sec) : 0.0;
@@ -591,6 +596,7 @@ void render_complete(const std::string& torrent_name, int64_t total_bytes, doubl
     PS4_LOG("  Total    : %s\n", format_bytes(total_bytes).c_str());
     PS4_LOG("  Time     : %.0f seconds\n", elapsed_sec);
     PS4_LOG("  Avg speed: %s\n", format_speed(avg_speed).c_str());
+    PS4_LOG("  Saved to : %s\n", save_dir.c_str());
     PS4_LOG("  Press [X] to exit.\n");
     PS4_LOG("============================================================\n");
 
@@ -608,7 +614,7 @@ void render_complete(const std::string& torrent_name, int64_t total_bytes, doubl
         std::snprintf(time_buf, sizeof(time_buf), "Time      : %.0f seconds", elapsed_sec);
         fb_draw_text(fb, 220, 490, time_buf, COL_SUBTEXT, 3);
         fb_draw_text(fb, 220, 555, "Avg Speed : " + format_speed(avg_speed), COL_SUBTEXT, 3);
-        fb_draw_text(fb, 220, 640, "Saved to  : /data/pkg/downloads", COL_TEXT, 3);
+        fb_draw_text(fb, 220, 640, "Saved to  : " + save_dir, COL_TEXT, 3);
         fb_draw_text(fb, 220, 860, "Press [X] Cross or [O] Circle to exit", COL_SUBTEXT, 2);
 
         fb_present();

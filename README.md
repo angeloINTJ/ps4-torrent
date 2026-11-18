@@ -18,9 +18,9 @@ dependencies beyond musl libc.
 
 | Requirement | Version | Notes |
 |---|---|---|
-| PS4 with jailbreak | FW ≤ 11.02 | GoldHEN or HEN with FPKG support active |
+| PS4 with jailbreak | FW ≤ 14.02 | GoldHEN / HEN (FPKG) or Userland ELF Loader (WebKit / BD-J / Lua) |
 | USB drive or FTP | — | Place `.torrent` in `/mnt/usb0/` or `/data/pkg/torrents/` |
-| Package Installer | — | GoldHEN Package Installer or Remote PKG Installer |
+| Package Installer / ELF Loader | — | GoldHEN Package Installer, Remote PKG Installer, or ELF Loader (port 9021) |
 
 ### On the PC (build environment)
 
@@ -101,20 +101,25 @@ cd ps4-torrent
 make
 ```
 
-The PKG will be generated at:
+The build outputs will be generated at:
 ```
-output/UP0000-BTRC00001_00-0000000000000000.pkg
+output/UP0000-BTRC00001_00-0000000000000000.pkg   # FPKG for GoldHEN / HEN (FW <= 14.02)
+output/ps4-torrent.elf                            # Standalone ELF for ELF Loaders (BD-J / Lua / WebKit)
+output/eboot.bin                                  # Signed Fake SELF binary
 ```
 
-### 6. Install on the PS4
+### 6. Install and Run on the PS4 (FW ≤ 14.02)
 
 1. Place a `.torrent` file in one of the supported locations:
    - **USB Drive:** root `/mnt/usb0/` or `/mnt/usb0/torrents/`
    - **Internal HDD (via FTP):** `/data/pkg/torrents/` (created automatically on first launch)
-2. Install `output/UP0000-BTRC00001_00-0000000000000000.pkg` via GoldHEN Package Installer or Remote PKG Installer
-3. Launch **PS4 Torrent** from the dashboard
+2. **Option A — GoldHEN / HEN (FPKG):**
+   - Install `output/UP0000-BTRC00001_00-0000000000000000.pkg` via GoldHEN Package Installer or Remote PKG Installer
+   - Launch **PS4 Torrent** from the dashboard
+3. **Option B — ELF Loader (FW 14.00 / 14.02 without FPKG enabler):**
+   - Send `output/ps4-torrent.elf` directly to your PS4's ELF loader (e.g. `nc <PS4_IP> 9021 < output/ps4-torrent.elf`)
 
-Downloads are saved to `/data/pkg/downloads/`. Progress is displayed directly on the TV screen (1080p framebuffer via `SceVideoOut`) as well as through native PS4 toast notifications.
+Downloads are saved to `/data/pkg/downloads/` (or automatically fall back to `/data/downloads/` or `/mnt/usb0/downloads/` if sandbox permissions restrict `/data/pkg`). Progress is displayed directly on the TV screen (1080p framebuffer via `SceVideoOut`) as well as through native PS4 toast notifications.
 
 ---
 

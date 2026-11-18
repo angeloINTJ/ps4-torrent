@@ -73,7 +73,12 @@ void render_error(const std::string& message);
 /**
  * Display the completion screen with a download summary.
  */
-void render_complete(const std::string& torrent_name, int64_t total_bytes, double elapsed_sec);
+void render_complete(
+    const std::string& torrent_name,
+    int64_t            total_bytes,
+    double             elapsed_sec,
+    const std::string& save_dir = "/data/pkg/downloads"
+);
 
 /**
  * Initialize PS4 SystemService, VideoOut framebuffer, UserService, and Pad.

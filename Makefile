@@ -195,9 +195,13 @@ $(GP4): $(PKG_ROOT)/eboot.bin $(PKG_ROOT)/sce_sys/param.sfo
 $(PKG_OUT): $(GP4)
 	@mkdir -p $(OUTDIR) $(DOTNET_BUNDLE_EXTRACT_BASE_DIR)
 	cd $(PROJDIR) && $(PKG_TOOL) pkg_build $(GP4) $(OUTDIR)
+	@cp $(INTDIR)/$(TARGET).elf $(OUTDIR)/$(TARGET).elf
+	@cp $(PKG_ROOT)/eboot.bin $(OUTDIR)/eboot.bin
 	@echo ""
 	@echo "  PKG generated: $(PKG_OUT)"
-	@echo "  Copy this file to the PS4 and install via GoldHEN / Remote PKG Installer."
+	@echo "  ELF generated: $(OUTDIR)/$(TARGET).elf"
+	@echo "  Copy the PKG to the PS4 and install via GoldHEN / Remote PKG Installer,"
+	@echo "  or send $(OUTDIR)/$(TARGET).elf via an ELF Loader on FW <= 14.02."
 
 clean:
 	@rm -rf $(INTDIR) $(OUTDIR)
