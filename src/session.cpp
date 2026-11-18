@@ -6,6 +6,7 @@
 #include "peer_wire.hpp"
 
 #include <fcntl.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -26,6 +27,10 @@ namespace bt {
 Session::Session(const std::string& torrent_path, const std::string& save_dir)
     : save_dir_(save_dir)
 {
+    // Ignore SIGPIPE so writing to a socket closed by a remote peer returns EPIPE
+    // instead of terminating the process on PS4 (FreeBSD) or Linux.
+    ::signal(SIGPIPE, SIG_IGN);
+
     std::string raw = read_file(torrent_path);
     meta_    = Metainfo::parse(raw);
     peer_id_ = generate_peer_id();

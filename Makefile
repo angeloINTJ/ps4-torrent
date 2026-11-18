@@ -121,9 +121,23 @@ OBJECTS := \
 PKG_OUT := $(OUTDIR)/UP0000-$(TITLE_ID)_00-0000000000000000.pkg
 GP4     := $(INTDIR)/project.gp4
 
-.PHONY: all clean
+.PHONY: all clean test
 
 all: $(PKG_OUT)
+
+# Run automated unit + end-to-end TCP integration test suite on host
+test:
+	@mkdir -p $(INTDIR)
+	$(CXX) -std=c++17 -O2 -Wall -Wextra -pthread -Iinclude \
+		tests/e2e_test.cpp \
+		src/bencode.cpp \
+		src/metainfo.cpp \
+		src/peer_wire.cpp \
+		src/piece_manager.cpp \
+		src/session.cpp \
+		src/tracker.cpp \
+		-o $(INTDIR)/e2e_test
+	$(INTDIR)/e2e_test
 
 # Compile .cpp
 $(INTDIR)/%.o: src/%.cpp

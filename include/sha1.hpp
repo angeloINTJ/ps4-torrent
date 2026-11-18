@@ -126,6 +126,18 @@ public:
         return diff == 0;
     }
 
+    // Format digest as 40-character lowercase hex string
+    static std::string to_hex(const Digest& d) {
+        static constexpr char HEX[] = "0123456789abcdef";
+        std::string out;
+        out.reserve(DIGEST_SIZE * 2);
+        for (uint8_t b : d) {
+            out += HEX[b >> 4];
+            out += HEX[b & 0x0F];
+        }
+        return out;
+    }
+
 private:
     static constexpr size_t BLOCK_SIZE = 64;
 
