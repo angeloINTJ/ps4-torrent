@@ -5,7 +5,8 @@
 //   - Track which pieces have been downloaded and verified
 //   - Verify the integrity of each piece via SHA1
 //   - Build the bitfield to announce to peers
-//   - Select the next piece/block to request (simple rarest-first strategy)
+//   - Select the next piece/block to request without duplicating in-flight blocks
+//   - Lazily allocate piece buffers to avoid exhausting PS4 RAM on large torrents
 //   - Write received blocks to the destination file
 //
 // Thread-safety:
@@ -41,19 +42,25 @@ enum class PieceStatus : uint8_t {
 /**
  * Represents a piece being downloaded.
  * Each piece is divided into 16 KiB blocks (BLOCK_SIZE).
+ * Buffer memory (`data`) is allocated lazily when the first block arrives
+ * and freed immediately after flushing to disk.
  */
 struct Piece {
     uint32_t              index;
+    int64_t               piece_len;
     PieceStatus           status;
-    std::vector<uint8_t>  data;              // Buffer accumulating blocks
+    std::vector<uint8_t>  data;              // Lazily allocated buffer accumulating blocks
     std::vector<bool>     blocks_received;   // Bitset: has block i arrived?
+    std::vector<bool>     blocks_requested;  // Bitset: is block i currently in-flight?
     uint32_t              blocks_done;       // Counter to avoid verifying every loop
 
-    explicit Piece(uint32_t idx, int64_t piece_len, size_t num_blocks)
+    explicit Piece(uint32_t idx, int64_t len, size_t num_blocks)
         : index(idx)
+        , piece_len(len)
         , status(PieceStatus::Missing)
-        , data(static_cast<size_t>(piece_len), 0)
+        , data()
         , blocks_received(num_blocks, false)
+        , blocks_requested(num_blocks, false)
         , blocks_done(0)
     {}
 };
@@ -77,7 +84,7 @@ public:
     /**
      * @param meta      Torrent metainfo
      * @param save_dir  Directory where files will be written
-     *                  (e.g. "/data/pkg" on a jailbroken PS4)
+     *                  (e.g. "/data/pkg/downloads" on a jailbroken PS4)
      */
     PieceManager(const Metainfo& meta, const std::string& save_dir);
 
@@ -96,14 +103,20 @@ public:
                        const std::vector<uint8_t>& data);
 
     /**
-     * Select the next block to request for a specific peer.
-     * Uses a simple strategy: first Missing piece, first missing block.
+     * Select the next block to request for a specific peer and mark it in-flight.
+     * Prioritizes unrequested blocks first; falls back to already-requested
+     * unreceived blocks (endgame mode) if all missing blocks are in-flight.
      *
      * @param peer_bitfield   The peer's bitfield (which pieces it has)
      * @return BlockRequest   — block to request
      * @return std::nullopt   — nothing to request (download complete or peer has nothing useful)
      */
-    std::optional<BlockRequest> next_request(const std::vector<uint8_t>& peer_bitfield) const;
+    std::optional<BlockRequest> next_request(const std::vector<uint8_t>& peer_bitfield);
+
+    /**
+     * Release in-flight block marks when a peer chokes us or disconnects.
+     */
+    void release_requests(const std::vector<BlockRequest>& requests);
 
     /**
      * Return our current bitfield (to send to the peer during handshake).
@@ -117,7 +130,7 @@ public:
 
     size_t  pieces_total()    const noexcept { return pieces_.size(); }
     size_t  pieces_done()     const noexcept { return done_count_.load(); }
-    bool    is_complete()     const noexcept { return done_count_ == pieces_.size(); }
+    bool    is_complete()     const noexcept { return done_count_.load() == pieces_.size(); }
 
     int64_t bytes_downloaded() const noexcept;
     int64_t bytes_total()      const noexcept { return meta_.total_length; }
@@ -130,6 +143,7 @@ private:
     std::string               save_dir_;
     std::vector<Piece>        pieces_;
     std::atomic<size_t>       done_count_{0};
+    std::atomic<int64_t>      bytes_done_{0};
 
     mutable std::mutex        mutex_;   // Protects pieces_
 

@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -54,7 +55,7 @@ void PeerConnection::recv_raw(void* data, size_t len) {
     while (len > 0) {
         ssize_t got = ::recv(fd_, ptr, len, 0);
         if (got <= 0)
-            throw std::runtime_error("peer_wire: recv() failed — peer disconnected");
+            throw std::runtime_error("peer_wire: recv() failed — peer disconnected or timed out");
         ptr += got;
         len -= static_cast<size_t>(got);
     }
@@ -76,6 +77,13 @@ void PeerConnection::connect(uint32_t ip, uint16_t port) {
     fd_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (fd_ < 0)
         throw std::runtime_error("peer_wire: socket() failed");
+
+    // Set 15-second send/receive timeouts so dead peers do not hang worker threads
+    struct timeval tv{};
+    tv.tv_sec  = 15;
+    tv.tv_usec = 0;
+    ::setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    ::setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
     struct sockaddr_in addr{};
     addr.sin_family      = AF_INET;
@@ -221,6 +229,10 @@ std::optional<PeerMessage> PeerConnection::read_message() {
     // Keep-alive
     if (msg_len == 0) return std::nullopt;
 
+    // Sanity limit: reject corrupt messages larger than 1 MiB
+    if (msg_len > 1024 * 1024)
+        throw std::runtime_error("peer_wire: message length exceeds sanity limit");
+
     // Read type byte
     uint8_t type_byte;
     recv_raw(&type_byte, 1);
@@ -293,7 +305,6 @@ std::optional<PeerMessage> PeerConnection::read_message() {
         // Unknown message — discard payload to stay in sync
         std::vector<uint8_t> discard(payload_len);
         if (payload_len > 0) recv_raw(discard.data(), payload_len);
-        // Return the message regardless (caller decides what to do)
         break;
     }
     }

@@ -18,9 +18,9 @@ dependencies beyond musl libc.
 
 | Requirement | Version | Notes |
 |---|---|---|
-| PS4 with jailbreak | FW ≤ 11.00 | GoldHEN or ps4debug active |
-| FTP access | — | For transferring `.torrent` files |
-| Remote PKG Installer | — | For installing the homebrew app |
+| PS4 with jailbreak | FW ≤ 11.02 | GoldHEN or HEN with FPKG support active |
+| USB drive or FTP | — | Place `.torrent` in `/mnt/usb0/` or `/data/pkg/torrents/` |
+| Package Installer | — | GoldHEN Package Installer or Remote PKG Installer |
 
 ### On the PC (build environment)
 
@@ -108,11 +108,13 @@ output/UP0000-BTRC00001_00-0000000000000000.pkg
 
 ### 6. Install on the PS4
 
-1. Place a `.torrent` file in `/data/pkg/torrents/` via FTP (ps4debug)
-2. Install the PKG using Remote PKG Installer
-3. Launch the app from the XMB
+1. Place a `.torrent` file in one of the supported locations:
+   - **USB Drive:** root `/mnt/usb0/` or `/mnt/usb0/torrents/`
+   - **Internal HDD (via FTP):** `/data/pkg/torrents/` (created automatically on first launch)
+2. Install `output/UP0000-BTRC00001_00-0000000000000000.pkg` via GoldHEN Package Installer or Remote PKG Installer
+3. Launch **PS4 Torrent** from the dashboard
 
-Downloads are saved to `/data/pkg/downloads/`.
+Downloads are saved to `/data/pkg/downloads/`. Progress is displayed directly on the TV screen (1080p framebuffer via `SceVideoOut`) as well as through native PS4 toast notifications.
 
 ---
 
@@ -175,17 +177,15 @@ main.cpp
 
 ---
 
-## Known limitations (v0.1)
+## Known limitations (v0.2)
 
 | Limitation | Related BEP | Planned |
 |---|---|---|
-| HTTP tracker only (no HTTPS or UDP) | BEP 15 | v0.2 |
+| HTTP tracker only (no HTTPS or UDP) | BEP 15 | v0.3 |
 | No DHT (Distributed Hash Table) | BEP 5 | v0.3 |
 | No PEX (Peer Exchange) | BEP 11 | v0.3 |
-| No seeding (download only) | BEP 3 | v0.2 |
-| Debug-log UI only (no graphics) | — | v0.2 (SDL2) |
-| Manual .torrent file selection | — | v0.2 |
-| Only the first .torrent in the directory | — | v0.2 |
+| No seeding (download only) | BEP 3 | v0.3 |
+| Auto-selects the first `.torrent` found | — | v0.3 (Interactive picker) |
 
 ---
 

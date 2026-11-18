@@ -10,6 +10,7 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -161,6 +162,13 @@ int tcp_connect(const std::string& host, uint16_t port) {
         throw std::runtime_error("tracker: socket() failed");
     }
 
+    // Set 15-second timeout on tracker socket
+    struct timeval tv{};
+    tv.tv_sec  = 15;
+    tv.tv_usec = 0;
+    ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
     if (::connect(fd, res->ai_addr, res->ai_addrlen) < 0) {
         ::close(fd);
         freeaddrinfo(res);
@@ -195,12 +203,12 @@ std::string http_get(const ParsedUrl& url, const std::string& qs) {
     request.reserve(512);
     request += "GET ";
     request += url.path;
-    request += '?';
+    request += (url.path.find('?') == std::string::npos) ? '?' : '&';
     request += qs;
     request += " HTTP/1.0\r\n";
     request += "Host: ";
     request += url.host;
-    request += "\r\nAccept: */*\r\nConnection: close\r\n\r\n";
+    request += "\r\nUser-Agent: PS4Torrent/0.2\r\nAccept: */*\r\nConnection: close\r\n\r\n";
 
     int fd = tcp_connect(url.host, url.port);
     send_all(fd, request.data(), request.size());
@@ -224,9 +232,14 @@ std::string http_get(const ParsedUrl& url, const std::string& qs) {
 
 std::string_view extract_body(std::string_view response) {
     auto sep = response.find("\r\n\r\n");
-    if (sep == std::string_view::npos)
-        throw std::runtime_error("tracker: invalid HTTP response (no header separator)");
-    return response.substr(sep + 4);
+    if (sep != std::string_view::npos)
+        return response.substr(sep + 4);
+
+    auto sep_lf = response.find("\n\n");
+    if (sep_lf != std::string_view::npos)
+        return response.substr(sep_lf + 2);
+
+    throw std::runtime_error("tracker: invalid HTTP response (no header separator)");
 }
 
 // -------------------------------------------------------------------------
@@ -251,30 +264,50 @@ std::vector<PeerAddr> parse_compact_peers(const std::string& data) {
         uint16_t port_be;
         std::memcpy(&port_be, data.data() + i + 4, 2);
         p.port = ntohs(port_be);
-        peers.push_back(p);
+        if (p.ip != 0 && p.port != 0) {
+            peers.push_back(p);
+        }
     }
 
     return peers;
 }
 
-} // anonymous namespace
+// -------------------------------------------------------------------------
+// Parse dictionary peer list (BEP 3 non-compact fallback)
+// -------------------------------------------------------------------------
 
-// =============================================================================
-// tracker_announce — public entry point
-// =============================================================================
+std::vector<PeerAddr> parse_dict_peers(const BList& list) {
+    std::vector<PeerAddr> peers;
+    peers.reserve(list.size());
 
-TrackerResponse tracker_announce(
-    const Metainfo&    metainfo,
-    const std::string& peer_id,
-    uint16_t           port,
-    int64_t            uploaded,
-    int64_t            downloaded,
-    int64_t            left,
-    const std::string& event)
+    for (const BValue& item : list) {
+        if (!item.is_dict()) continue;
+        const BDict& pd = item.as_dict();
+
+        auto ip_it   = pd.find("ip");
+        auto port_it = pd.find("port");
+        if (ip_it == pd.end() || !ip_it->second.is_string()) continue;
+        if (port_it == pd.end() || !port_it->second.is_int()) continue;
+
+        struct in_addr in{};
+        if (inet_aton(ip_it->second.as_string().c_str(), &in) != 0) {
+            PeerAddr p;
+            p.ip   = in.s_addr;
+            p.port = static_cast<uint16_t>(port_it->second.as_int());
+            if (p.ip != 0 && p.port != 0) {
+                peers.push_back(p);
+            }
+        }
+    }
+
+    return peers;
+}
+
+TrackerResponse announce_single_url(
+    const std::string& announce_url,
+    const std::string& qs)
 {
-    ParsedUrl   url  = parse_url(metainfo.announce);
-    std::string qs   = build_query_string(metainfo, peer_id, port,
-                                          uploaded, downloaded, left, event);
+    ParsedUrl   url  = parse_url(announce_url);
     std::string raw  = http_get(url, qs);
     auto        body = extract_body(raw);
 
@@ -305,13 +338,70 @@ TrackerResponse tracker_announce(
     tr.complete     = get_int("complete", 0);
     tr.incomplete   = get_int("incomplete", 0);
 
-    // Peers — only accept compact format
+    // Peers — support both compact (BEP 23 string) and dictionary list (BEP 3)
     auto peers_it = d.find("peers");
-    if (peers_it != d.end() && peers_it->second.is_string()) {
-        tr.peers = parse_compact_peers(peers_it->second.as_string());
+    if (peers_it != d.end()) {
+        if (peers_it->second.is_string()) {
+            tr.peers = parse_compact_peers(peers_it->second.as_string());
+        } else if (peers_it->second.is_list()) {
+            tr.peers = parse_dict_peers(peers_it->second.as_list());
+        }
     }
 
     return tr;
+}
+
+} // anonymous namespace
+
+// =============================================================================
+// tracker_announce — public entry point (with BEP 12 announce-list fallback)
+// =============================================================================
+
+TrackerResponse tracker_announce(
+    const Metainfo&    metainfo,
+    const std::string& peer_id,
+    uint16_t           port,
+    int64_t            uploaded,
+    int64_t            downloaded,
+    int64_t            left,
+    const std::string& event)
+{
+    std::string qs = build_query_string(metainfo, peer_id, port,
+                                        uploaded, downloaded, left, event);
+
+    // Collect candidate HTTP tracker URLs (primary + BEP 12 announce-list)
+    std::vector<std::string> urls;
+    if (metainfo.announce.substr(0, 7) == "http://") {
+        urls.push_back(metainfo.announce);
+    }
+    for (const auto& tier : metainfo.announce_list) {
+        for (const std::string& u : tier) {
+            if (u.substr(0, 7) == "http://" && u != metainfo.announce) {
+                urls.push_back(u);
+            }
+        }
+    }
+
+    if (urls.empty()) {
+        throw std::runtime_error(
+            "tracker: no HTTP tracker URL found in torrent (primary URL: " +
+            metainfo.announce + ")");
+    }
+
+    std::string last_error;
+    for (const std::string& url : urls) {
+        try {
+            TrackerResponse tr = announce_single_url(url, qs);
+            if (tr.ok()) {
+                return tr;
+            }
+            last_error = tr.failure;
+        } catch (const std::exception& e) {
+            last_error = e.what();
+        }
+    }
+
+    throw std::runtime_error("tracker: all HTTP trackers failed (last error: " + last_error + ")");
 }
 
 } // namespace bt

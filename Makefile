@@ -2,7 +2,7 @@
 # ps4-torrent — Makefile for the OpenOrbis PS4 Toolchain
 #
 # Prerequisite: OO_PS4_TOOLCHAIN variable pointing to the installed toolchain.
-# Example: export OO_PS4_TOOLCHAIN=/opt/openorbis
+# Example: export OO_PS4_TOOLCHAIN=/opt/openorbis/OpenOrbis/PS4Toolchain
 #
 # Usage:
 #   make          — build and generate the .pkg
@@ -10,12 +10,19 @@
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# Toolchain check
+# Toolchain check (with automatic fallback detection)
 # ---------------------------------------------------------------------------
 ifndef OO_PS4_TOOLCHAIN
-    $(error OO_PS4_TOOLCHAIN not set. Install OpenOrbis and export the variable.)
+    ifneq ($(wildcard /opt/openorbis/OpenOrbis/PS4Toolchain),)
+        OO_PS4_TOOLCHAIN := /opt/openorbis/OpenOrbis/PS4Toolchain
+    else ifneq ($(wildcard $(HOME)/openorbis/OpenOrbis/PS4Toolchain),)
+        OO_PS4_TOOLCHAIN := $(HOME)/openorbis/OpenOrbis/PS4Toolchain
+    else
+        $(error OO_PS4_TOOLCHAIN not set. Install OpenOrbis and export the variable.)
+    endif
 endif
 
+export OO_PS4_TOOLCHAIN
 OOSDK := $(OO_PS4_TOOLCHAIN)
 
 # ---------------------------------------------------------------------------
@@ -36,6 +43,11 @@ PKG_ROOT := $(INTDIR)/pkg_root
 # ---------------------------------------------------------------------------
 # Toolchain — LLVM/Clang cross-compiler for x86_64-freebsd (PS4)
 # ---------------------------------------------------------------------------
+export PATH := $(HOME)/bin:$(PATH)
+export LD_LIBRARY_PATH := $(HOME)/openssl1.1/lib:$(LD_LIBRARY_PATH)
+export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT := 1
+export DOTNET_BUNDLE_EXTRACT_BASE_DIR := $(HOME)/.cache/dotnet_bundle_extract
+
 CC           := clang
 CXX          := clang++
 LD           := ld.lld
@@ -65,15 +77,16 @@ CXXFLAGS := $(CFLAGS) -std=c++17
 
 # Required PS4 libraries
 LIBS := \
-    SceLibcInternal \
-    SceUserService  \
-    ScePad          \
-    SceVideoOut     \
-    SceNet          \
-    SceNetCtl       \
-    SceSysmodule    \
-    ScePosix        \
-    kernel          \
+    SceLibcInternal  \
+    SceSystemService \
+    SceUserService   \
+    ScePad           \
+    SceVideoOut      \
+    SceNet           \
+    SceNetCtl        \
+    SceSysmodule     \
+    ScePosix         \
+    kernel           \
     kernel_sys
 
 LFLAGS := \
@@ -105,9 +118,8 @@ OBJECTS := \
 # ---------------------------------------------------------------------------
 # Build rules
 # ---------------------------------------------------------------------------
-# Generate PKG
 PKG_OUT := $(OUTDIR)/UP0000-$(TITLE_ID)_00-0000000000000000.pkg
-GP4 := $(INTDIR)/project.gp4
+GP4     := $(INTDIR)/project.gp4
 
 .PHONY: all clean
 
@@ -128,16 +140,19 @@ $(INTDIR)/$(TARGET).elf: $(OBJECTS)
 	@mkdir -p $(INTDIR)
 	$(LD) $(LFLAGS) $(OOSDK)/lib/crt1.o $(OOSDK)/lib/crti.o $^ $(OOSDK)/lib/crtn.o -o $@
 
-# Generate fake SELF (eboot.bin)
+# Generate Fake SELF (eboot.bin)
+# Note: -out specifies the intermediate Orbis ELF (.oelf), while --eboot=<path>
+# produces the signed Fake SELF (magic 4F 15 3D 1D) required by PS4 GoldHEN.
 $(PKG_ROOT)/eboot.bin: $(INTDIR)/$(TARGET).elf
 	@mkdir -p $(PKG_ROOT)/sce_sys
-	$(CREATE_FSELF) -in $< -out $@ --eboot --paid 0x3800000000000011
+	$(CREATE_FSELF) -in=$< -out=$(INTDIR)/$(TARGET).oelf --eboot=$@ --paid 0x3800000000000011
 
-# Copy assets
+# Copy assets (param.sfo, icon0.png, right.sprx)
 $(PKG_ROOT)/sce_sys/param.sfo: assets/param.sfo
-	@mkdir -p $(PKG_ROOT)/sce_sys
+	@mkdir -p $(PKG_ROOT)/sce_sys/about
 	@cp $< $@
 	@cp assets/icon0.png $(PKG_ROOT)/sce_sys/icon0.png 2>/dev/null || true
+	@cp $(OOSDK)/src/modules/right.sprx $(PKG_ROOT)/sce_sys/about/right.sprx 2>/dev/null || true
 
 # Generate GP4
 $(GP4): $(PKG_ROOT)/eboot.bin $(PKG_ROOT)/sce_sys/param.sfo
@@ -163,22 +178,26 @@ $(GP4): $(PKG_ROOT)/eboot.bin $(PKG_ROOT)/sce_sys/param.sfo
 	@echo '	<files img_no="0">' >> $@
 	@echo '		<file targ_path="eboot.bin" orig_path="pkg_root/eboot.bin" />' >> $@
 	@echo '		<file targ_path="sce_sys/param.sfo" orig_path="pkg_root/sce_sys/param.sfo" />' >> $@
+	@if [ -f "$(PKG_ROOT)/sce_sys/icon0.png" ]; then \
+		echo '		<file targ_path="sce_sys/icon0.png" orig_path="pkg_root/sce_sys/icon0.png" />' >> $@; \
+	fi
+	@if [ -f "$(PKG_ROOT)/sce_sys/about/right.sprx" ]; then \
+		echo '		<file targ_path="sce_sys/about/right.sprx" orig_path="pkg_root/sce_sys/about/right.sprx" />' >> $@; \
+	fi
 	@echo '	</files>' >> $@
 	@echo '	<rootdir>' >> $@
 	@echo '		<dir targ_name="sce_sys">' >> $@
-	@echo '			<file targ_name="param.sfo" />' >> $@
+	@echo '			<dir targ_name="about" />' >> $@
 	@echo '		</dir>' >> $@
 	@echo '	</rootdir>' >> $@
 	@echo '</psproject>' >> $@
 
 $(PKG_OUT): $(GP4)
-	@mkdir -p $(OUTDIR)
-	LD_LIBRARY_PATH="$(HOME)/openssl1.1/lib:$$LD_LIBRARY_PATH" \
-	DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
+	@mkdir -p $(OUTDIR) $(DOTNET_BUNDLE_EXTRACT_BASE_DIR)
 	cd $(PROJDIR) && $(PKG_TOOL) pkg_build $(GP4) $(OUTDIR)
 	@echo ""
 	@echo "  PKG generated: $(PKG_OUT)"
-	@echo "  Copy this file to the PS4 and install via Remote PKG Installer."
+	@echo "  Copy this file to the PS4 and install via GoldHEN / Remote PKG Installer."
 
 clean:
 	@rm -rf $(INTDIR) $(OUTDIR)

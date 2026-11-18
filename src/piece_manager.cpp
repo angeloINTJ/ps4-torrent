@@ -29,7 +29,7 @@ PieceManager::PieceManager(const Metainfo& meta, const std::string& save_dir)
     : meta_(meta)
     , save_dir_(save_dir)
 {
-    // Pre-allocate the structure for each piece
+    // Pre-allocate metadata structure for each piece (buffers are allocated lazily)
     pieces_.reserve(meta.num_pieces());
 
     for (size_t i = 0; i < meta.num_pieces(); ++i) {
@@ -58,11 +58,11 @@ bool PieceManager::receive_block(
 
     Piece& p = pieces_[piece_index];
 
-    // Ignore blocks for pieces already complete or being reprocessed after hash failure
+    // Ignore blocks for pieces already complete
     if (p.status == PieceStatus::Complete) return false;
 
-    // Validate offset and size
-    if (begin + data.size() > p.data.size())
+    // Validate offset and size against piece length
+    if (static_cast<int64_t>(begin) + static_cast<int64_t>(data.size()) > p.piece_len)
         return false;
 
     // Determine the block index
@@ -70,12 +70,18 @@ bool PieceManager::receive_block(
     if (block_idx >= p.blocks_received.size())
         return false;
 
+    // Lazily allocate the piece buffer on the first received block
+    if (p.data.empty()) {
+        p.data.resize(static_cast<size_t>(p.piece_len), 0);
+    }
+
     // Copy the block into the piece buffer
     std::memcpy(p.data.data() + begin, data.data(), data.size());
 
     // Mark the block as received (only count once)
     if (!p.blocks_received[block_idx]) {
-        p.blocks_received[block_idx] = true;
+        p.blocks_received[block_idx]  = true;
+        p.blocks_requested[block_idx] = true;
         ++p.blocks_done;
         p.status = PieceStatus::Pending;
     }
@@ -97,11 +103,13 @@ bool PieceManager::verify_and_flush(Piece& p) {
     SHA1::Digest actual = SHA1::hash(p.data.data(), p.data.size());
 
     if (!SHA1::equal(actual, meta_.piece_hashes[p.index])) {
-        // Hash mismatch — reset the piece for re-download
-        p.status       = PieceStatus::HashFail;
-        p.blocks_done  = 0;
-        std::fill(p.blocks_received.begin(), p.blocks_received.end(), false);
-        std::fill(p.data.begin(), p.data.end(), 0);
+        // Hash mismatch — reset the piece for re-download and free buffer
+        p.status      = PieceStatus::HashFail;
+        p.blocks_done = 0;
+        std::fill(p.blocks_received.begin(),  p.blocks_received.end(),  false);
+        std::fill(p.blocks_requested.begin(), p.blocks_requested.end(), false);
+        p.data.clear();
+        p.data.shrink_to_fit();
         return false;
     }
 
@@ -114,6 +122,7 @@ bool PieceManager::verify_and_flush(Piece& p) {
     p.status = PieceStatus::Complete;
 
     done_count_.fetch_add(1, std::memory_order_relaxed);
+    bytes_done_.fetch_add(p.piece_len, std::memory_order_relaxed);
     return true;
 }
 
@@ -151,7 +160,7 @@ void PieceManager::write_piece(uint32_t piece_index, const std::vector<uint8_t>&
         if (meta_.is_single_file()) {
             path += '/' + meta_.name;
         } else {
-            path += '/' + file.path_str();
+            path += '/' + meta_.name + '/' + file.path_str();
         }
 
         // Open the file for writing (must already exist after allocate_files)
@@ -166,8 +175,8 @@ void PieceManager::write_piece(uint32_t piece_index, const std::vector<uint8_t>&
         }
 
         // Write with loop to handle partial writes
-        const uint8_t* src     = data.data() + piece_offset;
-        size_t         rem     = static_cast<size_t>(write_len);
+        const uint8_t* src = data.data() + piece_offset;
+        size_t         rem = static_cast<size_t>(write_len);
         while (rem > 0) {
             ssize_t written = ::write(fd, src, rem);
             if (written <= 0) {
@@ -217,8 +226,7 @@ void PieceManager::allocate_files() {
     } else {
         // Multi-file: create directory structure and one file per entry
         for (const FileEntry& file : meta_.files) {
-            // Reconstruct the full file path
-            std::string dir_path = save_dir_ + '/' + meta_.name;
+            std::string dir_path  = save_dir_ + '/' + meta_.name;
             std::string file_path = dir_path;
 
             for (size_t i = 0; i < file.path.size(); ++i) {
@@ -250,27 +258,40 @@ void PieceManager::allocate_files() {
 // =============================================================================
 
 std::optional<BlockRequest> PieceManager::next_request(
-    const std::vector<uint8_t>& peer_bitfield) const
+    const std::vector<uint8_t>& peer_bitfield)
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    for (const Piece& p : pieces_) {
-        // Skip completed pieces
+    // Pass 1: find a block that is neither received nor currently requested
+    for (Piece& p : pieces_) {
         if (p.status == PieceStatus::Complete) continue;
-
-        // Does the peer have this piece?
         if (!peer_has_piece(peer_bitfield, p.index)) continue;
 
-        // Find the first unreceived block
+        for (size_t bi = 0; bi < p.blocks_received.size(); ++bi) {
+            if (p.blocks_received[bi] || p.blocks_requested[bi]) continue;
+
+            p.blocks_requested[bi] = true;
+            uint32_t begin = static_cast<uint32_t>(bi) * BLOCK_SIZE;
+            int64_t  remaining = p.piece_len - static_cast<int64_t>(begin);
+            uint32_t block_len = static_cast<uint32_t>(
+                std::min(remaining, static_cast<int64_t>(BLOCK_SIZE)));
+
+            return BlockRequest{p.index, begin, block_len};
+        }
+    }
+
+    // Pass 2 (Endgame fallback): if all missing blocks are already requested,
+    // allow requesting an unreceived block so slow peers don't stall completion.
+    for (Piece& p : pieces_) {
+        if (p.status == PieceStatus::Complete) continue;
+        if (!peer_has_piece(peer_bitfield, p.index)) continue;
+
         for (size_t bi = 0; bi < p.blocks_received.size(); ++bi) {
             if (p.blocks_received[bi]) continue;
 
             uint32_t begin = static_cast<uint32_t>(bi) * BLOCK_SIZE;
-
-            // Block size: may be smaller for the last block of the last piece
-            int64_t  piece_sz    = meta_.piece_size(p.index);
-            int64_t  remaining   = piece_sz - static_cast<int64_t>(begin);
-            uint32_t block_len   = static_cast<uint32_t>(
+            int64_t  remaining = p.piece_len - static_cast<int64_t>(begin);
+            uint32_t block_len = static_cast<uint32_t>(
                 std::min(remaining, static_cast<int64_t>(BLOCK_SIZE)));
 
             return BlockRequest{p.index, begin, block_len};
@@ -278,6 +299,25 @@ std::optional<BlockRequest> PieceManager::next_request(
     }
 
     return std::nullopt; // Nothing to request
+}
+
+// =============================================================================
+// release_requests — unmark blocks that were in-flight on a choked/dropped peer
+// =============================================================================
+
+void PieceManager::release_requests(const std::vector<BlockRequest>& requests) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    for (const BlockRequest& req : requests) {
+        if (req.piece_index >= pieces_.size()) continue;
+        Piece& p = pieces_[req.piece_index];
+        if (p.status == PieceStatus::Complete) continue;
+
+        uint32_t bi = req.begin / BLOCK_SIZE;
+        if (bi < p.blocks_requested.size() && !p.blocks_received[bi]) {
+            p.blocks_requested[bi] = false;
+        }
+    }
 }
 
 // =============================================================================
@@ -306,14 +346,14 @@ std::vector<uint8_t> PieceManager::our_bitfield() const {
 // =============================================================================
 
 int64_t PieceManager::bytes_downloaded() const noexcept {
-    return static_cast<int64_t>(done_count_.load()) * meta_.piece_length;
+    return bytes_done_.load(std::memory_order_relaxed);
 }
 
 float PieceManager::progress_pct() const noexcept {
     if (meta_.total_length == 0) return 100.0f;
     float ratio = static_cast<float>(bytes_downloaded()) /
                   static_cast<float>(meta_.total_length);
-    return ratio * 100.0f;
+    return std::min(100.0f, ratio * 100.0f);
 }
 
 // =============================================================================

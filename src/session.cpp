@@ -9,9 +9,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <ctime>
+#include <set>
 #include <stdexcept>
 #include <thread>
 
@@ -59,9 +61,9 @@ std::string Session::read_file(const std::string& path) {
 }
 
 std::string Session::generate_peer_id() {
-    // Format: "-PS0001-" + 12 pseudo-random digits
-    // PS = PS4 Torrent, 0001 = version
-    std::string id = "-PS0001-";
+    // Format: "-PS0002-" + 12 pseudo-random digits
+    // PS = PS4 Torrent, 0002 = version 0.2
+    std::string id = "-PS0002-";
     id.reserve(20);
 
     // Time-based seed
@@ -99,11 +101,20 @@ void Session::stop() noexcept {
 void Session::peer_worker(PeerAddr addr) {
     peers_active_.fetch_add(1, std::memory_order_relaxed);
 
-    // Auto-cleanup scope guard (RAII-style, no exceptions needed)
+    // Track in-flight requests for this peer so they can be released on disconnect/choke
+    std::vector<BlockRequest> in_flight;
+
     struct Guard {
-        std::atomic<int>& counter;
-        ~Guard() { counter.fetch_sub(1, std::memory_order_relaxed); }
-    } guard{peers_active_};
+        std::atomic<int>&          counter;
+        PieceManager*              pm;
+        std::vector<BlockRequest>& in_flight;
+        ~Guard() {
+            if (pm && !in_flight.empty()) {
+                pm->release_requests(in_flight);
+            }
+            counter.fetch_sub(1, std::memory_order_relaxed);
+        }
+    } guard{peers_active_, pm_.get(), in_flight};
 
     try {
         PeerConnection conn;
@@ -120,16 +131,15 @@ void Session::peer_worker(PeerAddr addr) {
         // Peer bitfield — built up as Have/Bitfield messages arrive
         std::vector<uint8_t> peer_bf;
 
-        // Number of in-flight requests (simple pipeline)
-        static constexpr int PIPELINE_DEPTH = 5;
-        int requests_in_flight = 0;
+        // Number of in-flight requests (pipeline depth)
+        static constexpr size_t PIPELINE_DEPTH = 5;
 
         auto maybe_request = [&]() {
-            while (requests_in_flight < PIPELINE_DEPTH && !conn.state().peer_choking) {
+            while (in_flight.size() < PIPELINE_DEPTH && !conn.state().peer_choking) {
                 auto req = pm_->next_request(peer_bf);
                 if (!req) break;
                 conn.send_request(req->piece_index, req->begin, req->length);
-                ++requests_in_flight;
+                in_flight.push_back(*req);
             }
         };
 
@@ -168,35 +178,41 @@ void Session::peer_worker(PeerAddr addr) {
                 break;
 
             case MsgType::Choke:
-                // Peer choked us — in-flight requests are cancelled
-                // (no need to send Cancel, the peer will ignore them anyway)
-                requests_in_flight = 0;
+                // Peer choked us — release in-flight requests back to PieceManager
+                if (!in_flight.empty()) {
+                    pm_->release_requests(in_flight);
+                    in_flight.clear();
+                }
                 break;
 
-            case MsgType::Piece:
-                // Received a data block
-                if (requests_in_flight > 0) --requests_in_flight;
-                pm_->receive_block(msg.piece_index, msg.begin, msg.block);
+            case MsgType::Piece: {
+                // Remove from our in-flight list
+                auto it = std::find_if(in_flight.begin(), in_flight.end(),
+                    [&](const BlockRequest& r) {
+                        return r.piece_index == msg.piece_index && r.begin == msg.begin;
+                    });
+                if (it != in_flight.end()) {
+                    in_flight.erase(it);
+                }
 
-                // If the piece completed, announce Have to this peer
-                // (in a full multi-peer system, this would be broadcast)
-                if (pm_->pieces_done() > 0) {
+                // Store block; if the piece completed & verified, announce Have
+                bool piece_completed = pm_->receive_block(msg.piece_index, msg.begin, msg.block);
+                if (piece_completed) {
                     conn.send_have(msg.piece_index);
                 }
 
                 // Request more blocks to keep the pipeline full
                 maybe_request();
                 break;
+            }
 
             default:
-                // Other messages ignored for now
                 break;
             }
         }
 
     } catch (const std::exception& /* e */) {
-        // Connection errors are expected — peers can drop at any time
-        // In debug mode: log e.what() to the PS4 console
+        // Connection errors are expected — Guard releases any in-flight blocks
     }
 }
 
@@ -207,35 +223,37 @@ void Session::peer_worker(PeerAddr addr) {
 void Session::tracker_thread() {
     while (!stop_requested_.load() && !pm_->is_complete()) {
         try {
-            std::string event = "started";
+            // Wait for the interval requested by the tracker (or 30s minimum)
+            int wait_sec = 60;
             {
                 std::lock_guard<std::mutex> lk(tracker_mutex_);
-                // On subsequent calls, no special event
-                if (last_tracker_resp_.interval > 0) event = "";
+                if (last_tracker_resp_.interval > 0) {
+                    wait_sec = std::max(30, std::min(300, last_tracker_resp_.interval));
+                }
             }
+            for (int i = 0; i < wait_sec && !stop_requested_.load() && !pm_->is_complete(); ++i) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+            if (stop_requested_.load() || pm_->is_complete()) break;
 
             TrackerResponse resp = tracker_announce(
                 meta_, peer_id_, LOCAL_PORT,
                 /*uploaded=*/   0,
-                /*downloaded*/  pm_->bytes_downloaded(),
+                /*downloaded=*/ pm_->bytes_downloaded(),
                 /*left=*/       pm_->bytes_total() - pm_->bytes_downloaded(),
-                event
+                /*event=*/      ""
             );
 
-            {
+            if (resp.ok()) {
                 std::lock_guard<std::mutex> lk(tracker_mutex_);
                 last_tracker_resp_ = resp;
             }
 
-            // Wait for the interval requested by the tracker (or 30s minimum)
-            int wait_sec = std::max(30, resp.interval);
-            for (int i = 0; i < wait_sec && !stop_requested_.load(); ++i) {
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-            }
-
         } catch (...) {
             // Tracker failure is not fatal — wait and retry
-            std::this_thread::sleep_for(std::chrono::seconds(30));
+            for (int i = 0; i < 30 && !stop_requested_.load() && !pm_->is_complete(); ++i) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
         }
     }
 
@@ -257,7 +275,7 @@ void Session::tracker_thread() {
 
 void Session::progress_thread() {
     using Clock = std::chrono::steady_clock;
-    auto last_time  = Clock::now();
+    auto last_time     = Clock::now();
     int64_t last_bytes = pm_->bytes_downloaded();
 
     while (!stop_requested_.load() && !pm_->is_complete()) {
@@ -265,10 +283,10 @@ void Session::progress_thread() {
 
         if (!progress_cb_) continue;
 
-        auto    now        = Clock::now();
-        int64_t cur_bytes  = pm_->bytes_downloaded();
-        double  elapsed_s  = std::chrono::duration<double>(now - last_time).count();
-        double  speed      = (elapsed_s > 0)
+        auto    now       = Clock::now();
+        int64_t cur_bytes = pm_->bytes_downloaded();
+        double  elapsed_s = std::chrono::duration<double>(now - last_time).count();
+        double  speed     = (elapsed_s > 0 && cur_bytes >= last_bytes)
                                ? (cur_bytes - last_bytes) / elapsed_s
                                : 0.0;
 
@@ -294,8 +312,8 @@ void Session::progress_thread() {
     // Final callback (100%)
     if (progress_cb_ && pm_->is_complete()) {
         ProgressInfo info{};
-        info.pct        = 100.0f;
-        info.bytes_done = pm_->bytes_total();
+        info.pct         = 100.0f;
+        info.bytes_done  = pm_->bytes_total();
         info.bytes_total = pm_->bytes_total();
         progress_cb_(info);
     }
@@ -305,30 +323,75 @@ void Session::progress_thread() {
 // run_peer_pool — manage the pool of peer workers
 // =============================================================================
 
-void Session::run_peer_pool(const std::vector<PeerAddr>& peers) {
-    std::vector<std::thread> workers;
+void Session::run_peer_pool(const std::vector<PeerAddr>& initial_peers) {
+    struct WorkerEntry {
+        std::thread              thread;
+        std::shared_ptr<std::atomic<bool>> finished;
+        uint64_t                 key;
+    };
+
+    std::vector<WorkerEntry> workers;
     workers.reserve(MAX_PEERS);
 
+    auto make_key = [](const PeerAddr& p) -> uint64_t {
+        return (static_cast<uint64_t>(p.ip) << 16) | p.port;
+    };
+
+    std::vector<PeerAddr> known_peers = initial_peers;
     size_t peer_idx = 0;
 
     while (!stop_requested_.load() && !pm_->is_complete()) {
-        // Spawn workers up to the limit
-        while (peers_active_.load() < MAX_PEERS && peer_idx < peers.size()) {
-            PeerAddr addr = peers[peer_idx++];
-            workers.emplace_back([this, addr]() { peer_worker(addr); });
+        // Reap finished worker threads
+        for (auto it = workers.begin(); it != workers.end(); ) {
+            if (it->finished->load(std::memory_order_acquire)) {
+                if (it->thread.joinable()) it->thread.join();
+                it = workers.erase(it);
+            } else {
+                ++it;
+            }
         }
 
-        // If we've exhausted tracked peers, wait for new announce responses
-        if (peer_idx >= peers.size() && peers_active_.load() == 0) {
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+        // Refresh peer list from latest tracker announce when exhausted
+        if (peer_idx >= known_peers.size()) {
+            std::lock_guard<std::mutex> lk(tracker_mutex_);
+            if (!last_tracker_resp_.peers.empty()) {
+                known_peers = last_tracker_resp_.peers;
+                peer_idx    = 0;
+            }
+        }
+
+        // Spawn workers up to MAX_PEERS
+        while (peers_active_.load() < MAX_PEERS && peer_idx < known_peers.size()) {
+            PeerAddr addr = known_peers[peer_idx++];
+            uint64_t key  = make_key(addr);
+
+            // Skip if we already have an active worker for this peer
+            bool already_active = false;
+            for (const auto& w : workers) {
+                if (w.key == key) {
+                    already_active = true;
+                    break;
+                }
+            }
+            if (already_active) continue;
+
+            auto done_flag = std::make_shared<std::atomic<bool>>(false);
+            workers.push_back(WorkerEntry{
+                std::thread([this, addr, done_flag]() {
+                    peer_worker(addr);
+                    done_flag->store(true, std::memory_order_release);
+                }),
+                done_flag,
+                key
+            });
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 
-    // Wait for all workers to finish
-    for (auto& t : workers) {
-        if (t.joinable()) t.join();
+    // Wait for all remaining workers to finish
+    for (auto& w : workers) {
+        if (w.thread.joinable()) w.thread.join();
     }
 }
 

@@ -192,7 +192,10 @@ Metainfo Metainfo::parse(const std::string& raw) {
     // -------------------------------------------------------------------------
     // Root-level fields
     // -------------------------------------------------------------------------
-    m.announce = require_string(top, "announce");
+    auto ann_it = top.find("announce");
+    if (ann_it != top.end() && ann_it->second.is_string()) {
+        m.announce = ann_it->second.as_string();
+    }
 
     // announce-list (BEP 12) — optional
     auto al_it = top.find("announce-list");
@@ -205,6 +208,13 @@ Metainfo Metainfo::parse(const std::string& raw) {
             }
             if (!tier.empty()) m.announce_list.push_back(std::move(tier));
         }
+    }
+
+    if (m.announce.empty() && !m.announce_list.empty() && !m.announce_list[0].empty()) {
+        m.announce = m.announce_list[0][0];
+    }
+    if (m.announce.empty()) {
+        throw std::runtime_error("metainfo: required field missing: 'announce'");
     }
 
     // -------------------------------------------------------------------------
